@@ -352,7 +352,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    await upsertIndicator({
+    const vixRecord = {
       indicatorType: "VIX",
       fredSeriesId: "VIXCLS",
       observationDate: vixData.date,
@@ -365,7 +365,9 @@ export async function fetchRiskIndicators(
       riskLevel: determineRiskLevel("VIX", currentVal, previousVal),
       riskDescription: RISK_DESCRIPTIONS["VIX"] || "正常状态",
       dataSource: "FRED",
-    });
+    };
+    memoryCache.set("VIX", { ...vixRecord, id: "VIX", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
+    await upsertIndicator(vixRecord);
 
     // 存储历史记录
     const vixHistory = await fetchVIXHistory(apiKey, 6);
@@ -407,7 +409,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    await upsertIndicator({
+    const moveRecord = {
       indicatorType: "MOVE",
       fredSeriesId: null,
       observationDate: moveData.date,
@@ -420,7 +422,9 @@ export async function fetchRiskIndicators(
       riskLevel: determineRiskLevel("MOVE", currentVal, previousVal),
       riskDescription: RISK_DESCRIPTIONS["MOVE"] || "正常状态",
       dataSource: "Yahoo Finance",
-    });
+    };
+    memoryCache.set("MOVE", { ...moveRecord, id: "MOVE", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
+    await upsertIndicator(moveRecord);
 
     // 存储历史记录
     const moveHistory = await fetchMOVEHistory(6);
@@ -462,7 +466,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel: drl, RISK_DESCRIPTIONS: rd } = await import("./fredClient");
 
-    await upsertIndicator({
+    const cdsRecord = {
       indicatorType: "US_CDS_5Y",
       fredSeriesId: null,
       observationDate: cdsData.date,
@@ -475,7 +479,9 @@ export async function fetchRiskIndicators(
       riskLevel: drl("US_CDS_5Y", currentVal, previousVal),
       riskDescription: rd["US_CDS_5Y"] || "美国主权信用违约互换",
       dataSource: "worldgovernmentbonds.com",
-    });
+    };
+    memoryCache.set("US_CDS_5Y", { ...cdsRecord, id: "US_CDS_5Y", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
+    await upsertIndicator(cdsRecord);
 
     const cdsHistory = await fetchCDSHistory(6);
     for (const rec of cdsHistory) {
