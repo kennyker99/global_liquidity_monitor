@@ -7,16 +7,17 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 function buildDatabaseUrl(): string | undefined {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  // Log all env vars with MYSQL in name to help debug
-  const mysqlVars = Object.keys(process.env).filter(k => k.toUpperCase().includes('MYSQL'));
-  console.log("[Database] Available MYSQL vars:", mysqlVars);
-  // Railway provides individual MySQL variables (try all known naming conventions)
-  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST || process.env.MYSQL_PRIVATE_HOST;
-  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || process.env.MYSQL_PRIVATE_PORT || "3306";
-  const user = process.env.MYSQLUSER || process.env.MYSQL_USER;
-  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQL_ROOT_PASSWORD;
-  const database = process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE;
-  console.log("[Database] Building URL with host:", host, "user:", user, "database:", database);
+  // Log ALL env vars to find MySQL connection info
+  const allMysql = Object.entries(process.env)
+    .filter(([k]) => k.toUpperCase().includes('MYSQL') || k.toUpperCase().includes('DB') || k.toUpperCase().includes('DATABASE'))
+    .map(([k, v]) => `${k}=${v?.substring(0, 30)}`);
+  console.log("[Database] All DB-related env vars:", allMysql.join(", "));
+
+  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST || process.env.MYSQL_PRIVATE_HOST || process.env.DB_HOST;
+  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || process.env.MYSQL_PRIVATE_PORT || process.env.DB_PORT || "3306";
+  const user = process.env.MYSQLUSER || process.env.MYSQL_USER || process.env.DB_USER || process.env.MYSQL_USERNAME;
+  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQL_ROOT_PASSWORD || process.env.DB_PASSWORD;
+  const database = process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE || process.env.DB_NAME || process.env.DATABASE_NAME;
   if (host && user && password && database) {
     return `mysql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
   }
