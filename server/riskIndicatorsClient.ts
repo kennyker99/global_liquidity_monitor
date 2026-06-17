@@ -76,52 +76,68 @@ export async function fetchVIXHistory(
   }
 }
 
-// ─── MOVE：Yahoo Finance ^MOVE ────────────────────────────────────────────────
+// ─── MOVE：Yahoo Finance ^MOVE (via yahoo-finance2 npm package) ────────────────
 
 async function yahooFinanceFetch(symbol: string): Promise<{
   price: number;
   previousClose: number;
   date: string;
 } | null> {
+  // Try using yahoo-finance2 npm package first (more stable than raw fetch)
   try {
-    const encodedSymbol = encodeURIComponent(symbol);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=1d&range=5d`;
-    const response = await axios.get(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      timeout: 10000,
-    });
+    const yahooFinance = await import("yahoo-finance2");
+    const quote = await yahooFinance.default.quote(symbol);
+    if (!quote || !quote.regularMarketPrice) return null;
 
-    const result = response.data?.chart?.result?.[0];
-    if (!result) return null;
-
-    const timestamps: number[] = result.timestamp || [];
-    const closes: number[] = result.indicators?.quote?.[0]?.close || [];
-
-    if (closes.length === 0) return null;
-
-    // 找最新非 null 值
-    let latestIdx = closes.length - 1;
-    while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
-    if (latestIdx < 0) return null;
-
-    const price = closes[latestIdx]!;
-    const previousClose =
-      latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
-    const ts = timestamps[latestIdx];
-    const date = ts
-      ? new Date(ts * 1000).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
-
+    const price = parseFloat(String(quote.regularMarketPrice));
+    const previousClose = quote.regularMarketPreviousClose
+      ? parseFloat(String(quote.regularMarketPreviousClose))
+      : price;
+    const date = new Date().toISOString().slice(0, 10);
+    console.log(`[RiskClient] Fetched ${symbol} via yahoo-finance2: ${price}`);
     return { price, previousClose, date };
   } catch (err) {
-    console.error(`[RiskClient] Yahoo Finance fetch failed for ${symbol}:`, err);
-    return null;
+    console.error(`[RiskClient] yahoo-finance2 failed for ${symbol}:`, (err as Error).message);
   }
+
+  // Fallback: Direct API call with comprehensive headers
+  for (const base of ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]) {
+    try {
+      const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`;
+      const response = await axios.get(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate",
+          "Referer": "https://finance.yahoo.com",
+          "DNT": "1",
+        },
+        timeout: 15000,
+      });
+      const result = response.data?.chart?.result?.[0];
+      if (!result) continue;
+
+      const price = result.meta?.regularMarketPrice;
+      if (!price) continue;
+
+      const timestamps: number[] = result.timestamp || [];
+      const closes: number[] = result.indicators?.quote?.[0]?.close || [];
+      let latestIdx = closes.length - 1;
+      while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
+      if (latestIdx < 0) continue;
+
+      const previousClose = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
+      const ts = timestamps[latestIdx];
+      const date = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+      console.log(`[RiskClient] Fetched ${symbol} via direct API: ${price}`);
+      return { price, previousClose, date };
+    } catch (err) {
+      console.error(`[RiskClient] Direct API failed for ${symbol}:`, (err as Error).message);
+    }
+  }
+
+  return null;
 }
 
 async function yahooFinanceHistoryFetch(
