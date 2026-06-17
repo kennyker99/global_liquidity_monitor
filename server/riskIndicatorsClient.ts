@@ -139,26 +139,50 @@ function parseYahooChart(
     console.warn(`[RiskClient][MOVE] ${symbol}: chart.result[0] 为空`);
     return null;
   }
-  const metaPrice = result.meta?.regularMarketPrice;
+  const meta = result.meta ?? {};
+  const metaPrice = meta.regularMarketPrice;
+  const metaPrevClose = meta.chartPreviousClose ?? meta.previousClose;
+  const metaTime = meta.regularMarketTime; // 秒级时间戳
   const timestamps: number[] = result.timestamp || [];
   const closes: number[] = result.indicators?.quote?.[0]?.close || [];
 
+  // close 数组里最新的非空值（chart API 对指数最近几天常为 null/滞后）
   let latestIdx = closes.length - 1;
   while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
+  const latestClose = latestIdx >= 0 ? closes[latestIdx]! : null;
 
-  // 优先用 close 数组的最新值，没有就用 meta.regularMarketPrice
-  const price = latestIdx >= 0 ? closes[latestIdx]! : metaPrice;
+  // 关键修复：优先用 meta.regularMarketPrice（最新成交价），它比 close 数组新。
+  // close 数组只在 meta 没有价时作回退。
+  const price = metaPrice ?? latestClose;
   if (price == null) {
     console.warn(`[RiskClient][MOVE] ${symbol}: 无可用价格 (meta=${metaPrice}, closes=${closes.length})`);
     return null;
   }
 
-  const previousClose =
-    latestIdx > 0 ? closes[latestIdx - 1] ?? price : (result.meta?.chartPreviousClose ?? price);
-  const ts = timestamps[latestIdx];
-  const date = ts
-    ? new Date(ts * 1000).toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  // previousClose：优先 meta.chartPreviousClose；否则用 close 数组里早一格的值。
+  // 若 meta 价 == 最新 close（同一天），则前收应取 close[latestIdx-1]。
+  let previousClose: number;
+  if (metaPrevClose != null && (latestClose == null || metaPrice !== latestClose)) {
+    previousClose = metaPrevClose;
+  } else if (latestIdx > 0 && closes[latestIdx - 1] != null) {
+    previousClose = closes[latestIdx - 1]!;
+  } else {
+    previousClose = metaPrevClose ?? price;
+  }
+
+  // 日期：优先 meta.regularMarketTime（最新），否则用最新 close 的时间戳
+  let date: string;
+  if (metaTime) {
+    date = new Date(metaTime * 1000).toISOString().slice(0, 10);
+  } else if (latestIdx >= 0 && timestamps[latestIdx]) {
+    date = new Date(timestamps[latestIdx]! * 1000).toISOString().slice(0, 10);
+  } else {
+    date = new Date().toISOString().slice(0, 10);
+  }
+
+  console.log(
+    `[RiskClient][MOVE] ${symbol} parse: price=${price} (meta=${metaPrice}, lastClose=${latestClose}), prevClose=${previousClose}, date=${date}`
+  );
   return { price, previousClose, date };
 }
 

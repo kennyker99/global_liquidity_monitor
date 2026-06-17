@@ -302,7 +302,13 @@ export function CompactIndicatorCard({
                   <div style={{ ...MONO, fontSize: "10px", color: "#AABAC8", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: "4px" }}>DATA SOURCE</div>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <span style={{ ...MONO, fontSize: "13px", color: "#0D1F3C", fontWeight: 600 }}>
-                      {indicatorType?.startsWith("GOLD_") || indicatorType?.startsWith("SILVER_") ? "CME COMEX" : "FRED API"}
+                      {indicatorType?.startsWith("GOLD_") || indicatorType?.startsWith("SILVER_")
+                        ? "CME COMEX"
+                        : indicatorType === "MOVE"
+                        ? "Yahoo Finance"
+                        : indicatorType === "US_CDS_5Y"
+                        ? "WorldGovBonds"
+                        : "FRED API"}
                     </span>
                     {sourceUrl && (
                       <a
