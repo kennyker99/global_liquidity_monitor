@@ -76,109 +76,64 @@ export async function fetchVIXHistory(
   }
 }
 
-// ─── MOVE：Yahoo Finance ^MOVE ────────────────────────────────────────────────
-
-let _yahooCookie: string | null = null;
-let _yahooCrumb: string | null = null;
-
-async function getYahooCrumb(): Promise<{ cookie: string; crumb: string } | null> {
-  try {
-    // Step 1: get cookie
-    const cookieRes = await axios.get("https://fc.yahoo.com", {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      timeout: 10000,
-      maxRedirects: 5,
-    });
-    const setCookie = cookieRes.headers["set-cookie"];
-    const cookie = Array.isArray(setCookie) ? setCookie.map(c => c.split(";")[0]).join("; ") : "";
-    if (!cookie) return null;
-
-    // Step 2: get crumb
-    const crumbRes = await axios.get("https://query1.finance.yahoo.com/v1/test/getcrumb", {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": cookie,
-      },
-      timeout: 10000,
-    });
-    const crumb = crumbRes.data as string;
-    if (!crumb || crumb.includes("<")) return null;
-    _yahooCookie = cookie;
-    _yahooCrumb = crumb;
-    return { cookie, crumb };
-  } catch {
-    return null;
-  }
-}
+// ─── MOVE：Yahoo Finance ^MOVE (via yahoo-finance2 npm package) ────────────────
 
 async function yahooFinanceFetch(symbol: string): Promise<{
   price: number;
   previousClose: number;
   date: string;
 } | null> {
-  // Try with crumb authentication
+  // Try using yahoo-finance2 npm package first (more stable than raw fetch)
   try {
-    const auth = (_yahooCookie && _yahooCrumb)
-      ? { cookie: _yahooCookie, crumb: _yahooCrumb }
-      : await getYahooCrumb();
+    const yahooFinance = await import("yahoo-finance2");
+    const quote = await yahooFinance.default.quote(symbol);
+    if (!quote || !quote.regularMarketPrice) return null;
 
-    if (auth) {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d&crumb=${encodeURIComponent(auth.crumb)}`;
-      const response = await axios.get(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Cookie": auth.cookie,
-          "Accept": "application/json",
-        },
-        timeout: 15000,
-      });
-      const result = response.data?.chart?.result?.[0];
-      if (result) {
-        const timestamps: number[] = result.timestamp || [];
-        const closes: number[] = result.indicators?.quote?.[0]?.close || [];
-        let latestIdx = closes.length - 1;
-        while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
-        if (latestIdx >= 0) {
-          const price = closes[latestIdx]!;
-          const previousClose = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
-          const ts = timestamps[latestIdx];
-          const date = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-          return { price, previousClose, date };
-        }
-      }
-    }
+    const price = parseFloat(String(quote.regularMarketPrice));
+    const previousClose = quote.regularMarketPreviousClose
+      ? parseFloat(String(quote.regularMarketPreviousClose))
+      : price;
+    const date = new Date().toISOString().slice(0, 10);
+    console.log(`[RiskClient] Fetched ${symbol} via yahoo-finance2: ${price}`);
+    return { price, previousClose, date };
   } catch (err) {
-    console.error(`[RiskClient] Yahoo Finance crumb fetch failed for ${symbol}:`, (err as Error).message);
-    _yahooCookie = null;
-    _yahooCrumb = null;
+    console.error(`[RiskClient] yahoo-finance2 failed for ${symbol}:`, (err as Error).message);
   }
 
-  // Fallback: try without crumb
+  // Fallback: Direct API call with comprehensive headers
   for (const base of ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]) {
     try {
-      const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+      const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`;
       const response = await axios.get(url, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "gzip, deflate",
           "Referer": "https://finance.yahoo.com",
+          "DNT": "1",
         },
         timeout: 15000,
       });
       const result = response.data?.chart?.result?.[0];
       if (!result) continue;
+
+      const price = result.meta?.regularMarketPrice;
+      if (!price) continue;
+
       const timestamps: number[] = result.timestamp || [];
       const closes: number[] = result.indicators?.quote?.[0]?.close || [];
       let latestIdx = closes.length - 1;
       while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
       if (latestIdx < 0) continue;
-      const price = closes[latestIdx]!;
+
       const previousClose = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
       const ts = timestamps[latestIdx];
       const date = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+      console.log(`[RiskClient] Fetched ${symbol} via direct API: ${price}`);
       return { price, previousClose, date };
     } catch (err) {
-      console.error(`[RiskClient] Yahoo Finance fallback failed for ${symbol}:`, (err as Error).message);
+      console.error(`[RiskClient] Direct API failed for ${symbol}:`, (err as Error).message);
     }
   }
 
