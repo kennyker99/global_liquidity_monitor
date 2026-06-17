@@ -18,6 +18,7 @@ import {
 import { InsertLiquidityIndicator } from "../drizzle/schema";
 import { getLatestGoldFuturesMetrics, getGoldFuturesHistory } from "./goldFuturesClient";
 import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchMOVEHistory, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
+import { memoryCache } from "./memoryCache";
 
 // 真实的 FRED 指标（不包含黄金期货，因为黄金期货来自 CME）
 const FRED_INDICATOR_TYPES = [

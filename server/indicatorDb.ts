@@ -12,7 +12,7 @@ import {
   InsertDataUpdateLog,
 } from "../drizzle/schema";
 import { getDb } from "./db";
-import { memoryCache } from "./dataFetcher";
+import { memoryCache } from "./memoryCache";
 
 /**
  * 获取所有最新的流动性指标
