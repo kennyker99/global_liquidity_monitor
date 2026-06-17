@@ -7,12 +7,16 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 function buildDatabaseUrl(): string | undefined {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  // Railway provides individual MySQL variables
-  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST;
-  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || "3306";
+  // Log all env vars with MYSQL in name to help debug
+  const mysqlVars = Object.keys(process.env).filter(k => k.toUpperCase().includes('MYSQL'));
+  console.log("[Database] Available MYSQL vars:", mysqlVars);
+  // Railway provides individual MySQL variables (try all known naming conventions)
+  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST || process.env.MYSQL_PRIVATE_HOST;
+  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || process.env.MYSQL_PRIVATE_PORT || "3306";
   const user = process.env.MYSQLUSER || process.env.MYSQL_USER;
-  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD;
-  const database = process.env.MYSQL_DATABASE;
+  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD || process.env.MYSQL_ROOT_PASSWORD;
+  const database = process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE;
+  console.log("[Database] Building URL with host:", host, "user:", user, "database:", database);
   if (host && user && password && database) {
     return `mysql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
   }
