@@ -83,12 +83,12 @@ async function yahooFinanceFetch(symbol: string): Promise<{
   previousClose: number;
   date: string;
 } | null> {
-  // Try multiple Yahoo Finance endpoints
-  const urls = [
+  // Try Yahoo Finance endpoints first
+  const yahooUrls = [
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`,
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`,
   ];
-  for (const url of urls) {
+  for (const url of yahooUrls) {
     try {
       const response = await axios.get(url, {
         headers: {
@@ -99,29 +99,43 @@ async function yahooFinanceFetch(symbol: string): Promise<{
         },
         timeout: 15000,
       });
-
       const result = response.data?.chart?.result?.[0];
       if (!result) continue;
-
       const timestamps: number[] = result.timestamp || [];
       const closes: number[] = result.indicators?.quote?.[0]?.close || [];
-
       if (closes.length === 0) continue;
-
       let latestIdx = closes.length - 1;
       while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
       if (latestIdx < 0) continue;
-
       const price = closes[latestIdx]!;
       const previousClose = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
       const ts = timestamps[latestIdx];
       const date = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-
       return { price, previousClose, date };
     } catch (err) {
-      console.error(`[RiskClient] Yahoo Finance fetch failed for ${symbol} (${url}):`, err);
+      console.error(`[RiskClient] Yahoo Finance failed for ${symbol}:`, (err as Error).message);
     }
   }
+
+  // Fallback: Stooq CSV API
+  try {
+    const stooqSymbol = symbol.replace("^", "%5E");
+    const url = `https://stooq.com/q/d/l/?s=${stooqSymbol}&i=d`;
+    const response = await axios.get(url, { timeout: 15000, headers: { "User-Agent": "Mozilla/5.0" } });
+    const lines = (response.data as string).trim().split("\n");
+    if (lines.length < 2) return null;
+    // CSV: Date,Open,High,Low,Close,Volume
+    const latest = lines[lines.length - 1].split(",");
+    const prev = lines.length >= 3 ? lines[lines.length - 2].split(",") : null;
+    const price = parseFloat(latest[4]);
+    const previousClose = prev ? parseFloat(prev[4]) : price;
+    const date = latest[0];
+    if (isNaN(price)) return null;
+    return { price, previousClose, date };
+  } catch (err) {
+    console.error(`[RiskClient] Stooq fetch failed for ${symbol}:`, (err as Error).message);
+  }
+
   return null;
 }
 
