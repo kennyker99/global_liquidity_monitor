@@ -10,7 +10,7 @@ import {
   getHistoryByDateRange,
   getRecentHistoryRecords,
 } from "./indicatorDb";
-import { fetchAllIndicators, fetchGoldFuturesIndicators, fetchRiskIndicators } from "./dataFetcher";
+import { fetchAllIndicators, fetchGoldFuturesIndicators, fetchRiskIndicators, memoryCache } from "./dataFetcher";
 import { fetchCDSProxyHtml } from "./riskIndicatorsClient";
 import { upsertIndicator, upsertHistoryRecord, logDataUpdate } from "./indicatorDb";
 import { determineRiskLevel, RISK_DESCRIPTIONS } from "./fredClient";
@@ -32,7 +32,10 @@ export const appRouter = router({
   indicators: router({
     // 获取所有最新指标
     getAll: publicProcedure.query(async () => {
-      return await getAllLatestIndicators();
+      const dbData = await getAllLatestIndicators();
+      // If DB has data, return it; otherwise return in-memory cache
+      if (dbData && dbData.length > 0) return dbData;
+      return Array.from(memoryCache.values());
     }),
 
     // 获取特定指标

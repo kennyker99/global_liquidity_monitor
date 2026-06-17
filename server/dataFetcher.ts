@@ -15,6 +15,9 @@ import {
   upsertHistoryRecord,
   logDataUpdate,
 } from "./indicatorDb";
+
+// In-memory cache for when DB is unavailable
+export const memoryCache = new Map<string, Record<string, unknown>>();
 import { InsertLiquidityIndicator } from "../drizzle/schema";
 import { getLatestGoldFuturesMetrics, getGoldFuturesHistory } from "./goldFuturesClient";
 import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchMOVEHistory, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
@@ -91,6 +94,14 @@ export async function fetchAndUpdateIndicator(
       riskDescription,
       dataSource: "FRED",
     };
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set(indicatorType, {
+      ...indicatorData,
+      id: indicatorType,
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
 
     // 保存最新指标到数据库
     await upsertIndicator(indicatorData);
