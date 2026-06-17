@@ -12,6 +12,7 @@ import {
   InsertDataUpdateLog,
 } from "../drizzle/schema";
 import { getDb } from "./db";
+import { memoryCache } from "./dataFetcher";
 
 /**
  * 获取所有最新的流动性指标
@@ -19,15 +20,25 @@ import { getDb } from "./db";
 export async function getAllLatestIndicators() {
   const db = await getDb();
   if (!db) {
-    console.warn("[Database] Cannot get indicators: database not available");
-    return [];
+    console.warn("[Database] Cannot get indicators: database not available, using memory cache");
+    return Array.from(memoryCache.values());
   }
 
   try {
     const results = await db.select().from(liquidityIndicators);
+    // 如果数据库返回空但内存缓存有数据，使用缓存
+    if (results.length === 0 && memoryCache.size > 0) {
+      console.warn("[Database] Database returned empty results, using memory cache fallback");
+      return Array.from(memoryCache.values());
+    }
     return results;
   } catch (error) {
     console.error("[Database] Failed to get all indicators:", error);
+    // 出错时回退到内存缓存
+    if (memoryCache.size > 0) {
+      console.warn("[Database] Error getting indicators, using memory cache fallback");
+      return Array.from(memoryCache.values());
+    }
     throw error;
   }
 }

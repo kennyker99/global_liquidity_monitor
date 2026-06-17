@@ -15,9 +15,6 @@ import {
   upsertHistoryRecord,
   logDataUpdate,
 } from "./indicatorDb";
-
-// In-memory cache for when DB is unavailable
-export const memoryCache = new Map<string, Record<string, unknown>>();
 import { InsertLiquidityIndicator } from "../drizzle/schema";
 import { getLatestGoldFuturesMetrics, getGoldFuturesHistory } from "./goldFuturesClient";
 import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchMOVEHistory, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
@@ -94,14 +91,6 @@ export async function fetchAndUpdateIndicator(
       riskDescription,
       dataSource: "FRED",
     };
-
-    // 保存到内存缓存（数据库不可用时的备用）
-    memoryCache.set(indicatorType, {
-      ...indicatorData,
-      id: indicatorType,
-      lastUpdatedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    });
 
     // 保存最新指标到数据库
     await upsertIndicator(indicatorData);
@@ -352,7 +341,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    const vixRecord = {
+    const vixIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "VIX",
       fredSeriesId: "VIXCLS",
       observationDate: vixData.date,
@@ -366,8 +355,16 @@ export async function fetchRiskIndicators(
       riskDescription: RISK_DESCRIPTIONS["VIX"] || "正常状态",
       dataSource: "FRED",
     };
-    memoryCache.set("VIX", { ...vixRecord, id: "VIX", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
-    await upsertIndicator(vixRecord);
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("VIX", {
+      ...vixIndicatorData,
+      id: "VIX",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await upsertIndicator(vixIndicatorData);
 
     // 存储历史记录
     const vixHistory = await fetchVIXHistory(apiKey, 6);
@@ -409,7 +406,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    const moveRecord = {
+    const moveIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "MOVE",
       fredSeriesId: null,
       observationDate: moveData.date,
@@ -423,8 +420,16 @@ export async function fetchRiskIndicators(
       riskDescription: RISK_DESCRIPTIONS["MOVE"] || "正常状态",
       dataSource: "Yahoo Finance",
     };
-    memoryCache.set("MOVE", { ...moveRecord, id: "MOVE", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
-    await upsertIndicator(moveRecord);
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("MOVE", {
+      ...moveIndicatorData,
+      id: "MOVE",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await upsertIndicator(moveIndicatorData);
 
     // 存储历史记录
     const moveHistory = await fetchMOVEHistory(6);
@@ -466,7 +471,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel: drl, RISK_DESCRIPTIONS: rd } = await import("./fredClient");
 
-    const cdsRecord = {
+    const cdsIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "US_CDS_5Y",
       fredSeriesId: null,
       observationDate: cdsData.date,
@@ -480,8 +485,16 @@ export async function fetchRiskIndicators(
       riskDescription: rd["US_CDS_5Y"] || "美国主权信用违约互换",
       dataSource: "worldgovernmentbonds.com",
     };
-    memoryCache.set("US_CDS_5Y", { ...cdsRecord, id: "US_CDS_5Y", lastUpdatedAt: new Date().toISOString(), createdAt: new Date().toISOString() });
-    await upsertIndicator(cdsRecord);
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("US_CDS_5Y", {
+      ...cdsIndicatorData,
+      id: "US_CDS_5Y",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await upsertIndicator(cdsIndicatorData);
 
     const cdsHistory = await fetchCDSHistory(6);
     for (const rec of cdsHistory) {
