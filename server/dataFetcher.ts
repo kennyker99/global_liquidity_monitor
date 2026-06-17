@@ -341,7 +341,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    await upsertIndicator({
+    const vixIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "VIX",
       fredSeriesId: "VIXCLS",
       observationDate: vixData.date,
@@ -354,7 +354,17 @@ export async function fetchRiskIndicators(
       riskLevel: determineRiskLevel("VIX", currentVal, previousVal),
       riskDescription: RISK_DESCRIPTIONS["VIX"] || "正常状态",
       dataSource: "FRED",
+    };
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("VIX", {
+      ...vixIndicatorData,
+      id: "VIX",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     });
+
+    await upsertIndicator(vixIndicatorData);
 
     // 存储历史记录
     const vixHistory = await fetchVIXHistory(apiKey, 6);
@@ -396,7 +406,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel, RISK_DESCRIPTIONS } = await import("./fredClient");
 
-    await upsertIndicator({
+    const moveIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "MOVE",
       fredSeriesId: null,
       observationDate: moveData.date,
@@ -409,7 +419,17 @@ export async function fetchRiskIndicators(
       riskLevel: determineRiskLevel("MOVE", currentVal, previousVal),
       riskDescription: RISK_DESCRIPTIONS["MOVE"] || "正常状态",
       dataSource: "Yahoo Finance",
+    };
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("MOVE", {
+      ...moveIndicatorData,
+      id: "MOVE",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     });
+
+    await upsertIndicator(moveIndicatorData);
 
     // 存储历史记录
     const moveHistory = await fetchMOVEHistory(6);
@@ -451,7 +471,7 @@ export async function fetchRiskIndicators(
 
     const { determineRiskLevel: drl, RISK_DESCRIPTIONS: rd } = await import("./fredClient");
 
-    await upsertIndicator({
+    const cdsIndicatorData: InsertLiquidityIndicator = {
       indicatorType: "US_CDS_5Y",
       fredSeriesId: null,
       observationDate: cdsData.date,
@@ -464,7 +484,17 @@ export async function fetchRiskIndicators(
       riskLevel: drl("US_CDS_5Y", currentVal, previousVal),
       riskDescription: rd["US_CDS_5Y"] || "美国主权信用违约互换",
       dataSource: "worldgovernmentbonds.com",
+    };
+
+    // 保存到内存缓存（数据库不可用时的备用）
+    memoryCache.set("US_CDS_5Y", {
+      ...cdsIndicatorData,
+      id: "US_CDS_5Y",
+      lastUpdatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     });
+
+    await upsertIndicator(cdsIndicatorData);
 
     const cdsHistory = await fetchCDSHistory(6);
     for (const rec of cdsHistory) {
