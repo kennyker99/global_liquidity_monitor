@@ -31,6 +31,7 @@ interface CompactIndicatorCardProps {
   externalLoading?: boolean;
   accentColor?: "green" | "navy" | "gold" | "silver";
   sourceUrl?: string;
+  hideHistory?: boolean;
 }
 
 // ─── 强调色配置（CME 风格）────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ export function CompactIndicatorCard({
   externalLoading,
   accentColor = "green",
   sourceUrl,
+  hideHistory,
 }: CompactIndicatorCardProps) {
   const [showDetail, setShowDetail] = useState(false);
   const accent = ACCENT[accentColor] ?? ACCENT.green;
@@ -328,7 +330,7 @@ export function CompactIndicatorCard({
               </div>
 
               {/* 历史数据 */}
-              {indicatorType && (
+              {indicatorType && !hideHistory && (
                 <div>
                   <div style={{ ...MONO, fontSize: "10px", color: "#AABAC8", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: "12px", fontWeight: 700 }}>
                     HISTORICAL OBSERVATIONS

@@ -17,7 +17,7 @@ import {
 } from "./indicatorDb";
 import { InsertLiquidityIndicator } from "../drizzle/schema";
 import { getLatestGoldFuturesMetrics, getGoldFuturesHistory } from "./goldFuturesClient";
-import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchMOVEHistory, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
+import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
 import { memoryCache } from "./memoryCache";
 
 // 真实的 FRED 指标（不包含黄金期货，因为黄金期货来自 CME）
@@ -432,16 +432,7 @@ export async function fetchRiskIndicators(
 
     await upsertIndicator(moveIndicatorData);
 
-    // 存储历史记录
-    const moveHistory = await fetchMOVEHistory(6);
-    for (const rec of moveHistory) {
-      await upsertHistoryRecord({
-        indicatorType: "MOVE",
-        observationDate: rec.date,
-        value: rec.value,
-        unit: "bps",
-      });
-    }
+    // MOVE 只需当前值，不再存储历史记录
 
     await logDataUpdate({ indicatorType: "MOVE", status: "success", errorMessage: null });
     console.log(`[DataFetcher] MOVE updated: ${moveData.value} (${moveData.date})`);

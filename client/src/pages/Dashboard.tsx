@@ -469,6 +469,7 @@ export default function Dashboard() {
                     indicatorType="MOVE"
                     accentColor={"red" as any}
                     sourceUrl="https://finance.yahoo.com/quote/%5EMOVE/"
+                    hideHistory
                   />
                 </div>
               )}
