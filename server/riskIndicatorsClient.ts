@@ -76,31 +76,14 @@ export async function fetchVIXHistory(
   }
 }
 
-// ─── MOVE：Yahoo Finance ^MOVE (via yahoo-finance2 npm package) ────────────────
+// ─── MOVE：Yahoo Finance ^MOVE (Direct API with headers) ──────────────────────
 
 async function yahooFinanceFetch(symbol: string): Promise<{
   price: number;
   previousClose: number;
   date: string;
 } | null> {
-  // Try using yahoo-finance2 npm package first (more stable than raw fetch)
-  try {
-    const yahooFinance = await import("yahoo-finance2");
-    const quote = await yahooFinance.default.quote(symbol);
-    if (!quote || !quote.regularMarketPrice) return null;
-
-    const price = parseFloat(String(quote.regularMarketPrice));
-    const previousClose = quote.regularMarketPreviousClose
-      ? parseFloat(String(quote.regularMarketPreviousClose))
-      : price;
-    const date = new Date().toISOString().slice(0, 10);
-    console.log(`[RiskClient] Fetched ${symbol} via yahoo-finance2: ${price}`);
-    return { price, previousClose, date };
-  } catch (err) {
-    console.error(`[RiskClient] yahoo-finance2 failed for ${symbol}:`, (err as Error).message);
-  }
-
-  // Fallback: Direct API call with comprehensive headers
+  // Direct API call with comprehensive headers to avoid detection/blocking
   for (const base of ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]) {
     try {
       const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`;
