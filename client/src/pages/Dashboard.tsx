@@ -11,6 +11,7 @@ import {
   buildGoldIndicatorHistory,
   buildSilverIndicatorHistory,
 } from "@/hooks/useCMEGoldFutures";
+import { useMOVE } from "@/hooks/useMOVE";
 
 // ─── 各指标官方数据源直达链接 ────────────────────────────────────────────────
 const SOURCE_URLS: Record<string, string> = {
@@ -77,6 +78,7 @@ export default function Dashboard() {
   const { data: indicators, isLoading, refetch } = trpc.indicators.getAll.useQuery();
   const gold = useCMEGoldFutures();
   const silver = useCMESilverFutures();
+  const move = useMOVE();
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -427,7 +429,7 @@ export default function Dashboard() {
 
             {/* ── 风险指标列（VIX / MOVE / US 5Y CDS）── */}
             <div className="flex flex-col gap-3">
-              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).length} />
+              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).length + (move.data ? 1 : 0)} />
               {(grouped["风险指标"] ?? []).map((item: any, i: number) => (
                 <div key={item.id} className="animate-slide-up" style={{ animationDelay: `${(4 * 5 + i) * 50}ms` }}>
                   <CompactIndicatorCard
@@ -450,8 +452,28 @@ export default function Dashboard() {
                   />
                 </div>
               ))}
-              {/* 如果风险指标尚未加载，显示占位提示 */}
-              {(grouped["风险指标"] ?? []).length === 0 && (
+              {/* MOVE 指数 — 前端直接从 Yahoo Finance 获取 */}
+              {move.data && (
+                <div className="animate-slide-up">
+                  <CompactIndicatorCard
+                    title="MOVE 债券波动率指数"
+                    shortTitle="MOVE"
+                    currentValue={move.data.value}
+                    unit="bps"
+                    changeValue={move.data.changeValue}
+                    changePercent={move.data.changePercent}
+                    riskLevel={parseFloat(move.data.value) > 120 ? "warning" : parseFloat(move.data.value) > 80 ? "caution" : "normal"}
+                    riskDescription="衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张"
+                    lastUpdatedAt={move.data.date}
+                    group="RISK INDICATORS"
+                    indicatorType="MOVE"
+                    accentColor={"red" as any}
+                    sourceUrl="https://finance.yahoo.com/quote/%5EMOVE/"
+                  />
+                </div>
+              )}
+              {/* 占位提示 */}
+              {(grouped["风险指标"] ?? []).length === 0 && !move.data && !move.isLoading && (
                 <div className="flex flex-col gap-2">
                   {["VIX 恐慌指数", "MOVE 债券波动率指数", "美国5年信用违约互换"].map((name) => (
                     <div key={name} className="rounded border px-4 py-3 text-xs" style={{ background: "#FFF5F5", border: "1px solid #FFCCCC", color: "#AA3333", fontFamily: "'IBM Plex Mono', monospace" }}>
