@@ -1,0 +1,233 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-normal: var(--status-normal);
+  --color-status-caution: var(--status-caution);
+  --color-status-warning: var(--status-warning);
+}
+
+/* ─── CME Group Color Palette ───────────────────────────────────────────────── */
+:root {
+  --radius: 0.25rem;
+
+  /* CME 主色 */
+  --cme-navy:        #0D1F3C;   /* 深海军蓝 hero */
+  --cme-navy-mid:    #1A3A5C;   /* 中等海军蓝 */
+  --cme-navy-light:  #1E4976;   /* 浅海军蓝 */
+  --cme-green:       #00A651;   /* CME 品牌绿 */
+  --cme-green-dark:  #007A3D;   /* 深绿 hover */
+  --cme-green-light: #00C060;   /* 亮绿 */
+  --cme-red:         #D32F2F;   /* 负值红 */
+  --cme-red-light:   #EF5350;   /* 亮红 */
+
+  /* 内容区 */
+  --background:          oklch(0.97 0.00 0);   /* 近白 #F7F8FA */
+  --foreground:          oklch(0.15 0.01 250);  /* 深海军蓝文字 */
+  --card:                oklch(1.00 0.00 0);    /* 纯白卡片 */
+  --card-foreground:     oklch(0.15 0.01 250);
+  --popover:             oklch(1.00 0.00 0);
+  --popover-foreground:  oklch(0.15 0.01 250);
+
+  /* CME 绿作为 primary */
+  --primary:             oklch(0.60 0.18 155);  /* #00A651 */
+  --primary-foreground:  oklch(1.00 0.00 0);
+
+  --secondary:           oklch(0.95 0.00 0);
+  --secondary-foreground:oklch(0.30 0.01 250);
+
+  --muted:               oklch(0.94 0.00 0);
+  --muted-foreground:    oklch(0.50 0.01 250);
+
+  --accent:              oklch(0.60 0.18 155);
+  --accent-foreground:   oklch(1.00 0.00 0);
+
+  --destructive:         oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(1.00 0.00 0);
+
+  --border:              oklch(0.88 0.00 0);    /* 浅灰边框 */
+  --input:               oklch(0.94 0.00 0);
+  --ring:                oklch(0.60 0.18 155);
+
+  /* Chart colors */
+  --chart-1:             oklch(0.60 0.18 155);  /* CME green */
+  --chart-2:             oklch(0.45 0.15 250);  /* navy blue */
+  --chart-3:             oklch(0.55 0.22 25);   /* red */
+  --chart-4:             oklch(0.65 0.15 50);   /* amber */
+  --chart-5:             oklch(0.55 0.15 300);  /* purple */
+
+  /* Sidebar */
+  --sidebar:             oklch(0.12 0.02 250);  /* 深海军蓝 */
+  --sidebar-foreground:  oklch(0.92 0.01 80);
+  --sidebar-primary:     oklch(0.60 0.18 155);
+  --sidebar-primary-foreground: oklch(1.00 0.00 0);
+  --sidebar-accent:      oklch(0.20 0.02 250);
+  --sidebar-accent-foreground: oklch(0.92 0.01 80);
+  --sidebar-border:      oklch(0.22 0.02 250);
+  --sidebar-ring:        oklch(0.60 0.18 155);
+
+  /* Status colors */
+  --status-normal:       oklch(0.60 0.18 155);  /* CME green */
+  --status-caution:      oklch(0.72 0.15 75);   /* amber */
+  --status-warning:      oklch(0.55 0.22 25);   /* red */
+}
+
+.dark {
+  --background:          oklch(0.10 0.02 250);
+  --foreground:          oklch(0.92 0.01 80);
+  --card:                oklch(0.13 0.02 250);
+  --card-foreground:     oklch(0.92 0.01 80);
+  --border:              oklch(0.22 0.02 250);
+  --muted-foreground:    oklch(0.55 0.01 80);
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground;
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  font-feature-settings: "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.container {
+  @apply mx-auto max-w-7xl px-4;
+}
+
+.flex {
+  @apply flex min-h-0 min-w-0;
+}
+
+button {
+  @apply transition-all duration-150;
+}
+
+button:active {
+  @apply scale-[0.97];
+}
+
+/* CME 等宽数字字体 */
+.font-mono-num,
+.cme-num {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ─── CME Hero Banner ──────────────────────────────────────────────────────── */
+.cme-hero {
+  background: linear-gradient(135deg, #0D1F3C 0%, #1A3A5C 60%, #1E4976 100%);
+}
+
+/* ─── CME 数据值颜色 ───────────────────────────────────────────────────────── */
+.cme-positive { color: #00A651; }
+.cme-negative { color: #D32F2F; }
+.cme-neutral  { color: #5A6A7A; }
+
+/* ─── CME 卡片样式 ─────────────────────────────────────────────────────────── */
+.cme-card {
+  background: #FFFFFF;
+  border: 1px solid #E0E5EC;
+  border-radius: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cme-card:hover {
+  border-color: #00A651;
+  box-shadow: 0 2px 12px rgba(0, 166, 81, 0.10);
+}
+
+/* ─── CME 表格样式 ─────────────────────────────────────────────────────────── */
+.cme-table-row-even { background: #F5F7FA; }
+.cme-table-row-odd  { background: #FFFFFF; }
+
+/* ─── CME 标签样式 ─────────────────────────────────────────────────────────── */
+.cme-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: #7A8A9A;
+}
+
+/* ─── CME Tab 下划线激活 ───────────────────────────────────────────────────── */
+.cme-tab-active {
+  border-bottom: 3px solid #00A651;
+  color: #0D1F3C;
+  font-weight: 700;
+}
+
+/* ─── 状态徽章 ─────────────────────────────────────────────────────────────── */
+.badge-normal  { background: #E8F5EE; color: #007A3D; border: 1px solid #B2DFCC; }
+.badge-caution { background: #FFF8E1; color: #B8860B; border: 1px solid #FFE082; }
+.badge-warning { background: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
+
+/* ─── 入场动画 ─────────────────────────────────────────────────────────────── */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slideUp 0.25s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+/* ─── 分隔线 ───────────────────────────────────────────────────────────────── */
+.cme-divider {
+  border-top: 1px solid #E0E5EC;
+}
+
+/* ─── 响应式 ───────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .container { @apply px-3; }
+}
