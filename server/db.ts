@@ -5,11 +5,26 @@ import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+function buildDatabaseUrl(): string | undefined {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  // Railway provides individual MySQL variables
+  const host = process.env.MYSQLHOST || process.env.MYSQL_HOST;
+  const port = process.env.MYSQLPORT || process.env.MYSQL_PORT || "3306";
+  const user = process.env.MYSQLUSER || process.env.MYSQL_USER;
+  const password = process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD;
+  const database = process.env.MYSQL_DATABASE;
+  if (host && user && password && database) {
+    return `mysql://${user}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+  }
+  return undefined;
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  const dbUrl = buildDatabaseUrl();
+  if (!_db && dbUrl) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle(dbUrl);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;

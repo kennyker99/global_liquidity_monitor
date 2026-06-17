@@ -105,6 +105,55 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
+  // 自动建表
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (db) {
+      const { sql } = await import("drizzle-orm");
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS \`liquidity_indicators\` (
+        \`id\` int AUTO_INCREMENT NOT NULL,
+        \`indicatorType\` varchar(64) NOT NULL,
+        \`fredSeriesId\` varchar(64),
+        \`observationDate\` varchar(10) NOT NULL,
+        \`currentValue\` varchar(255) NOT NULL,
+        \`previousValue\` varchar(255),
+        \`changeValue\` varchar(255),
+        \`changePercent\` varchar(255),
+        \`unit\` varchar(64) NOT NULL,
+        \`frequency\` varchar(32) NOT NULL,
+        \`riskLevel\` enum('normal','caution','warning') NOT NULL DEFAULT 'normal',
+        \`riskDescription\` text,
+        \`dataSource\` varchar(64) NOT NULL,
+        \`lastUpdatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+        \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+        CONSTRAINT \`liquidity_indicators_id\` PRIMARY KEY(\`id\`),
+        CONSTRAINT \`liquidity_indicators_indicatorType_unique\` UNIQUE(\`indicatorType\`)
+      )`);
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS \`indicator_history\` (
+        \`id\` int AUTO_INCREMENT NOT NULL,
+        \`indicatorType\` varchar(64) NOT NULL,
+        \`observationDate\` varchar(10) NOT NULL,
+        \`value\` varchar(255) NOT NULL,
+        \`unit\` varchar(64) NOT NULL,
+        \`createdAt\` timestamp NOT NULL DEFAULT (now()),
+        CONSTRAINT \`indicator_history_id\` PRIMARY KEY(\`id\`)
+      )`);
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS \`data_update_log\` (
+        \`id\` int AUTO_INCREMENT NOT NULL,
+        \`indicatorType\` varchar(64) NOT NULL,
+        \`status\` varchar(32) NOT NULL,
+        \`errorMessage\` text,
+        \`recordsUpdated\` int DEFAULT 0,
+        \`updatedAt\` timestamp NOT NULL DEFAULT (now()),
+        CONSTRAINT \`data_update_log_id\` PRIMARY KEY(\`id\`)
+      )`);
+      console.log("[Database] Tables initialized successfully");
+    }
+  } catch (err) {
+    console.warn("[Database] Table initialization failed:", err);
+  }
+
   // 初始化 FRED 数据获取器
   const fredApiKey = process.env.FRED_API_KEY;
   if (fredApiKey) {
