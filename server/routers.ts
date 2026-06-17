@@ -10,8 +10,9 @@ import {
   getHistoryByDateRange,
   getRecentHistoryRecords,
 } from "./indicatorDb";
-import { fetchAllIndicators, fetchGoldFuturesIndicators, fetchRiskIndicators, memoryCache } from "./dataFetcher";
-import { fetchCDSProxyHtml } from "./riskIndicatorsClient";
+import { fetchAllIndicators, fetchGoldFuturesIndicators, fetchRiskIndicators } from "./dataFetcher";
+import { fetchCDSProxyHtml, fetchMOVEQuote, type MOVEQuote } from "./riskIndicatorsClient";
+import { memoryCache } from "./memoryCache";
 import { upsertIndicator, upsertHistoryRecord, logDataUpdate } from "./indicatorDb";
 import { determineRiskLevel, RISK_DESCRIPTIONS } from "./fredClient";
 
@@ -36,6 +37,56 @@ export const appRouter = router({
       // If DB has data, return it; otherwise return in-memory cache
       if (dbData && dbData.length > 0) return dbData;
       return Array.from(memoryCache.values());
+    }),
+
+    // 获取 MOVE Index（服务端抓 Yahoo Finance，避开前端 CORS）
+    // 返回统一格式：{ symbol, name, price, change, changePercent, updatedAt }
+    getMOVE: publicProcedure.query(async (): Promise<MOVEQuote | null> => {
+      console.log("[Router][getMOVE] 收到请求，开始服务端抓取 MOVE...");
+      // 1) 先尝试实时抓取
+      const live = await fetchMOVEQuote();
+      if (live) {
+        // 写入内存缓存，供后续回退
+        memoryCache.set("MOVE", {
+          indicatorType: "MOVE",
+          id: "MOVE",
+          currentValue: String(live.price),
+          previousValue: live.change !== null ? String(live.price - live.change) : null,
+          changeValue: live.change !== null ? String(live.change) : "0",
+          changePercent: live.changePercent !== null ? String(live.changePercent) : "0",
+          unit: "bps",
+          observationDate: live.updatedAt,
+          riskLevel:
+            live.price > 120 ? "warning" : live.price > 80 ? "caution" : "normal",
+          riskDescription: "衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张",
+          dataSource: "Yahoo Finance",
+          lastUpdatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        });
+        console.log("[Router][getMOVE] 实时抓取成功，返回:", JSON.stringify(live));
+        return live;
+      }
+
+      // 2) 实时失败 → 回退到内存缓存
+      const cached = memoryCache.get("MOVE");
+      if (cached && cached.currentValue) {
+        const price = parseFloat(String(cached.currentValue));
+        const changeValue = cached.changeValue ? parseFloat(String(cached.changeValue)) : null;
+        const changePercent = cached.changePercent ? parseFloat(String(cached.changePercent)) : null;
+        const fallback: MOVEQuote = {
+          symbol: "^MOVE",
+          name: "MOVE Index",
+          price,
+          change: changeValue && changeValue !== 0 ? changeValue : null,
+          changePercent: changePercent && changePercent !== 0 ? changePercent : null,
+          updatedAt: String(cached.observationDate ?? cached.lastUpdatedAt ?? ""),
+        };
+        console.log("[Router][getMOVE] 实时失败，使用内存缓存回退:", JSON.stringify(fallback));
+        return fallback;
+      }
+
+      console.error("[Router][getMOVE] 实时和缓存都没有 MOVE 数据，返回 null");
+      return null;
     }),
 
     // 获取特定指标

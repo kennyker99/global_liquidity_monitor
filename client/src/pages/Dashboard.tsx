@@ -104,7 +104,7 @@ export default function Dashboard() {
   ) {
     const latest = gold.latest;
     const previous = gold.previous;
-    const dbRecord = indicators?.find((i: any) => i.indicatorType === type);
+    const dbRecord = indicators?.find((i: any) => i.indicatorType === type) as any;
     const useCME = !gold.isLoading && latest !== null;
 
     const currVal = useCME ? latest![field] : dbRecord ? parseFloat(dbRecord.currentValue) : null;
@@ -429,8 +429,8 @@ export default function Dashboard() {
 
             {/* ── 风险指标列（VIX / MOVE / US 5Y CDS）── */}
             <div className="flex flex-col gap-3">
-              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).length + (move.data ? 1 : 0)} />
-              {(grouped["风险指标"] ?? []).map((item: any, i: number) => (
+              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).filter((it: any) => it.indicatorType !== "MOVE").length + (move.data ? 1 : 0)} />
+              {(grouped["风险指标"] ?? []).filter((it: any) => it.indicatorType !== "MOVE").map((item: any, i: number) => (
                 <div key={item.id} className="animate-slide-up" style={{ animationDelay: `${(4 * 5 + i) * 50}ms` }}>
                   <CompactIndicatorCard
                     title={INDICATOR_META[item.indicatorType]?.title ?? item.indicatorType}

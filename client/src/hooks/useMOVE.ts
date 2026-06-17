@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { trpc } from "@/lib/trpc";
 
 interface MOVEData {
   value: string;
@@ -8,58 +8,33 @@ interface MOVEData {
   changePercent: string;
 }
 
+/**
+ * MOVE Index hook。
+ *
+ * 重要：不再从浏览器直接请求 Yahoo Finance —— query1.finance.yahoo.com 不返回
+ * CORS 头，浏览器 fetch 必定失败。改为调用后端 tRPC 接口 indicators.getMOVE
+ * （同源，无 CORS 问题），由服务端用 crumb 认证抓取 Yahoo。
+ */
 export function useMOVE(): { data: MOVEData | null; isLoading: boolean } {
-  const [data, setData] = useState<MOVEData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: quote, isLoading } = trpc.indicators.getMOVE.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // 5 分钟内不重复请求
+  });
 
-  useEffect(() => {
-    async function fetchMOVE() {
-      try {
-        const res = await fetch(
-          "https://query1.finance.yahoo.com/v8/finance/chart/%5EMOVE?interval=1d&range=5d",
-          {
-            headers: {
-              "Accept": "application/json",
-            },
-          }
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        const result = json?.chart?.result?.[0];
-        if (!result) throw new Error("No result");
+  if (!quote) {
+    return { data: null, isLoading };
+  }
 
-        const closes: number[] = result.indicators?.quote?.[0]?.close || [];
-        const timestamps: number[] = result.timestamp || [];
-
-        let latestIdx = closes.length - 1;
-        while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
-        if (latestIdx < 0) throw new Error("No valid closes");
-
-        const price = closes[latestIdx]!;
-        const prev = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
-        const change = price - prev;
-        const changePct = prev !== 0 ? (change / Math.abs(prev)) * 100 : 0;
-        const ts = timestamps[latestIdx];
-        const date = ts
-          ? new Date(ts * 1000).toISOString().slice(0, 10)
-          : new Date().toISOString().slice(0, 10);
-
-        setData({
-          value: price.toFixed(2),
-          previousValue: prev.toFixed(2),
-          date,
-          changeValue: change.toFixed(4),
-          changePercent: changePct.toFixed(2),
-        });
-      } catch (err) {
-        console.error("[useMOVE] Failed:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    fetchMOVE();
-  }, []);
+  // change / changePercent 可能为 null —— 即使如此，只要 price 有值就显示
+  const data: MOVEData = {
+    value: quote.price.toFixed(2),
+    previousValue:
+      quote.change !== null ? (quote.price - quote.change).toFixed(2) : quote.price.toFixed(2),
+    date: quote.updatedAt,
+    changeValue: quote.change !== null ? quote.change.toFixed(4) : "",
+    changePercent: quote.changePercent !== null ? quote.changePercent.toFixed(2) : "",
+  };
 
   return { data, isLoading };
 }

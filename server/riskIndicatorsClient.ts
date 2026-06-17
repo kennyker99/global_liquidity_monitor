@@ -76,50 +76,166 @@ export async function fetchVIXHistory(
   }
 }
 
-// ─── MOVE：Yahoo Finance ^MOVE (Direct API with headers) ──────────────────────
+// ─── MOVE：Yahoo Finance ^MOVE (crumb auth + symbol fallback + logging) ───────
 
+let _yahooCookie: string | null = null;
+let _yahooCrumb: string | null = null;
+
+/** 获取 Yahoo Finance 的 cookie + crumb（绕过 2024 年后的反爬认证） */
+async function getYahooCrumb(): Promise<{ cookie: string; crumb: string } | null> {
+  try {
+    // Step 1: 获取 cookie（访问任意 Yahoo 页面）
+    const cookieRes = await axios.get("https://fc.yahoo.com", {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      timeout: 10000,
+      maxRedirects: 5,
+      validateStatus: () => true, // fc.yahoo.com 可能返回 404 但仍带 set-cookie
+    });
+    const setCookie = cookieRes.headers["set-cookie"];
+    const cookie = Array.isArray(setCookie)
+      ? setCookie.map((c) => c.split(";")[0]).join("; ")
+      : "";
+    if (!cookie) {
+      console.warn("[RiskClient][MOVE] getYahooCrumb: no cookie returned");
+      return null;
+    }
+
+    // Step 2: 用 cookie 换 crumb
+    const crumbRes = await axios.get(
+      "https://query1.finance.yahoo.com/v1/test/getcrumb",
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Cookie: cookie,
+        },
+        timeout: 10000,
+      }
+    );
+    const crumb = String(crumbRes.data || "");
+    if (!crumb || crumb.includes("<")) {
+      console.warn("[RiskClient][MOVE] getYahooCrumb: invalid crumb:", crumb.slice(0, 40));
+      return null;
+    }
+    _yahooCookie = cookie;
+    _yahooCrumb = crumb;
+    console.log("[RiskClient][MOVE] getYahooCrumb: success, crumb obtained");
+    return { cookie, crumb };
+  } catch (err) {
+    console.error("[RiskClient][MOVE] getYahooCrumb failed:", (err as Error).message);
+    return null;
+  }
+}
+
+/** 解析 Yahoo chart 响应为 { price, previousClose, date } */
+function parseYahooChart(
+  result: any,
+  symbol: string
+): { price: number; previousClose: number; date: string } | null {
+  if (!result) {
+    console.warn(`[RiskClient][MOVE] ${symbol}: chart.result[0] 为空`);
+    return null;
+  }
+  const metaPrice = result.meta?.regularMarketPrice;
+  const timestamps: number[] = result.timestamp || [];
+  const closes: number[] = result.indicators?.quote?.[0]?.close || [];
+
+  let latestIdx = closes.length - 1;
+  while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
+
+  // 优先用 close 数组的最新值，没有就用 meta.regularMarketPrice
+  const price = latestIdx >= 0 ? closes[latestIdx]! : metaPrice;
+  if (price == null) {
+    console.warn(`[RiskClient][MOVE] ${symbol}: 无可用价格 (meta=${metaPrice}, closes=${closes.length})`);
+    return null;
+  }
+
+  const previousClose =
+    latestIdx > 0 ? closes[latestIdx - 1] ?? price : (result.meta?.chartPreviousClose ?? price);
+  const ts = timestamps[latestIdx];
+  const date = ts
+    ? new Date(ts * 1000).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  return { price, previousClose, date };
+}
+
+/**
+ * 从 Yahoo Finance 抓取单个 symbol 的最新价。
+ * 注意：^ 必须 encode 成 %5E（encodeURIComponent 自动处理）。
+ */
+async function yahooFetchSingle(symbol: string): Promise<{
+  price: number;
+  previousClose: number;
+  date: string;
+} | null> {
+  const encoded = encodeURIComponent(symbol); // ^MOVE → %5EMOVE
+  const auth =
+    _yahooCookie && _yahooCrumb
+      ? { cookie: _yahooCookie, crumb: _yahooCrumb }
+      : await getYahooCrumb();
+
+  for (const base of [
+    "https://query1.finance.yahoo.com",
+    "https://query2.finance.yahoo.com",
+  ]) {
+    const crumbParam = auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
+    const url = `${base}/v8/finance/chart/${encoded}?interval=1d&range=10d${crumbParam}`;
+    console.log(`[RiskClient][MOVE] 请求 URL: ${url}`);
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://finance.yahoo.com",
+          ...(auth ? { Cookie: auth.cookie } : {}),
+        },
+        timeout: 15000,
+      });
+      const result = response.data?.chart?.result?.[0];
+      console.log(
+        `[RiskClient][MOVE] ${symbol} @ ${base}: HTTP ${response.status}, chart.result[0] 存在=${!!result}`
+      );
+      const parsed = parseYahooChart(result, symbol);
+      if (parsed) {
+        console.log(
+          `[RiskClient][MOVE] ${symbol} 解析成功: price=${parsed.price}, prev=${parsed.previousClose}, date=${parsed.date}`
+        );
+        return parsed;
+      }
+    } catch (err) {
+      const status = (err as any)?.response?.status;
+      console.error(
+        `[RiskClient][MOVE] ${symbol} @ ${base} 失败: HTTP ${status ?? "?"} ${(err as Error).message}`
+      );
+      // crumb 可能过期，清掉缓存下次重新获取
+      if (status === 401 || status === 403 || status === 429) {
+        _yahooCookie = null;
+        _yahooCrumb = null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 抓取 MOVE 最新值。symbol 回退：^MOVE → MOVE。
+ */
 async function yahooFinanceFetch(symbol: string): Promise<{
   price: number;
   previousClose: number;
   date: string;
 } | null> {
-  // Direct API call with comprehensive headers to avoid detection/blocking
-  for (const base of ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]) {
-    try {
-      const url = `${base}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`;
-      const response = await axios.get(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Accept-Encoding": "gzip, deflate",
-          "Referer": "https://finance.yahoo.com",
-          "DNT": "1",
-        },
-        timeout: 15000,
-      });
-      const result = response.data?.chart?.result?.[0];
-      if (!result) continue;
-
-      const price = result.meta?.regularMarketPrice;
-      if (!price) continue;
-
-      const timestamps: number[] = result.timestamp || [];
-      const closes: number[] = result.indicators?.quote?.[0]?.close || [];
-      let latestIdx = closes.length - 1;
-      while (latestIdx >= 0 && closes[latestIdx] == null) latestIdx--;
-      if (latestIdx < 0) continue;
-
-      const previousClose = latestIdx > 0 ? closes[latestIdx - 1] ?? price : price;
-      const ts = timestamps[latestIdx];
-      const date = ts ? new Date(ts * 1000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-      console.log(`[RiskClient] Fetched ${symbol} via direct API: ${price}`);
-      return { price, previousClose, date };
-    } catch (err) {
-      console.error(`[RiskClient] Direct API failed for ${symbol}:`, (err as Error).message);
-    }
+  const candidates = symbol === "^MOVE" ? ["^MOVE", "MOVE"] : [symbol];
+  for (const sym of candidates) {
+    const data = await yahooFetchSingle(sym);
+    if (data) return data;
   }
-
+  console.error(`[RiskClient][MOVE] 所有 symbol 候选都失败: ${candidates.join(", ")}`);
   return null;
 }
 
@@ -128,13 +244,20 @@ async function yahooFinanceHistoryFetch(
   limit = 6
 ): Promise<Array<{ date: string; value: string }>> {
   try {
-    const encodedSymbol = encodeURIComponent(symbol);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=1d&range=30d`;
+    const encodedSymbol = encodeURIComponent(symbol); // ^MOVE → %5EMOVE
+    const auth =
+      _yahooCookie && _yahooCrumb
+        ? { cookie: _yahooCookie, crumb: _yahooCrumb }
+        : await getYahooCrumb();
+    const crumbParam = auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=1d&range=30d${crumbParam}`;
     const response = await axios.get(url, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "application/json",
+        Referer: "https://finance.yahoo.com",
+        ...(auth ? { Cookie: auth.cookie } : {}),
       },
       timeout: 10000,
     });
@@ -178,6 +301,46 @@ export async function fetchMOVE(): Promise<{
     date: data.date,
     previousValue: data.previousClose.toFixed(2),
   };
+}
+
+/** MOVE 统一返回格式（供前端 tRPC 接口直接使用） */
+export interface MOVEQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number | null;
+  changePercent: number | null;
+  updatedAt: string;
+}
+
+/**
+ * 抓取 MOVE 并返回统一格式。即使 change 为 null，只要 price 有值就返回。
+ */
+export async function fetchMOVEQuote(): Promise<MOVEQuote | null> {
+  console.log("[RiskClient][MOVE] fetchMOVEQuote: 开始抓取 ^MOVE ...");
+  const data = await yahooFinanceFetch("^MOVE");
+  if (!data) {
+    console.error("[RiskClient][MOVE] fetchMOVEQuote: 抓取失败，返回 null");
+    return null;
+  }
+  const change =
+    data.previousClose && data.previousClose !== data.price
+      ? data.price - data.previousClose
+      : null;
+  const changePercent =
+    change !== null && data.previousClose !== 0
+      ? (change / Math.abs(data.previousClose)) * 100
+      : null;
+  const quote: MOVEQuote = {
+    symbol: "^MOVE",
+    name: "MOVE Index",
+    price: data.price,
+    change,
+    changePercent,
+    updatedAt: data.date,
+  };
+  console.log("[RiskClient][MOVE] fetchMOVEQuote: 返回数据 =", JSON.stringify(quote));
+  return quote;
 }
 
 export async function fetchMOVEHistory(
