@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { CompactIndicatorCard } from "@/components/CompactIndicatorCard";
+import { CompactIndicatorCard, type AlertSignal } from "@/components/CompactIndicatorCard";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { RefreshCw } from "lucide-react";
@@ -64,6 +64,42 @@ const CME_RISK_DESC: Record<string, string> = {
   SILVER_DELIVERIES: "白银实物交割量（每合约 5000 盎司），反映白银实物需求压力",
 };
 
+// ─── 信号灯配置 ──────────────────────────────────────────────────────────────
+// Rule 3 & 4：连续天数阈值（3 = 过去 3 天每天都比前一天低/高才触发）
+const CONSECUTIVE_DAYS = 3;
+// Rule 5：SRF 单日绝对值跳升阈值（方案A，单位：百万美元，50_000 = 500亿美元）
+const SRF_SURGE_THRESHOLD = 50_000;
+
+/** Rule 3 辅助：检查历史数据是否连续 N 天下降（history 按日期降序） */
+function checkConsecutiveDecline(
+  history: { value: string }[] | undefined,
+  days: number
+): { triggered: boolean; reason: string } {
+  if (!history || history.length < days + 1)
+    return { triggered: false, reason: `数据不足` };
+  const vals = history.slice(0, days + 1).map(h => parseFloat(h.value));
+  if (vals.some(isNaN)) return { triggered: false, reason: "含无效数据" };
+  for (let i = 0; i < days; i++) {
+    if (vals[i] >= vals[i + 1]) return { triggered: false, reason: `近${days}天未持续下降` };
+  }
+  return { triggered: true, reason: `连续${days}天下降` };
+}
+
+/** Rule 4 辅助：检查历史数据是否连续 N 天上升（history 按日期降序） */
+function checkConsecutiveRise(
+  history: { value: string }[] | undefined,
+  days: number
+): { triggered: boolean; reason: string } {
+  if (!history || history.length < days + 1)
+    return { triggered: false, reason: `数据不足` };
+  const vals = history.slice(0, days + 1).map(h => parseFloat(h.value));
+  if (vals.some(isNaN)) return { triggered: false, reason: "含无效数据" };
+  for (let i = 0; i < days; i++) {
+    if (vals[i] <= vals[i + 1]) return { triggered: false, reason: `近${days}天未持续上升` };
+  }
+  return { triggered: true, reason: `连续${days}天上升` };
+}
+
 const GROUPS = [
   { key: "货币市场利率", label: "MONEY MARKET",    labelCN: "货币市场利率", accent: "green"  },
   { key: "流动性工具",   label: "LIQUIDITY TOOLS", labelCN: "流动性工具",   accent: "navy"   },
@@ -79,6 +115,73 @@ export default function Dashboard() {
   const gold = useCMEGoldFutures();
   const silver = useCMESilverFutures();
   const move = useMOVE();
+
+  // ── 信号灯所需历史数据（Rules 3/4/5 需要连续多日数据）──────────────────────
+  const { data: onrrpHistory } = trpc.indicators.getRecentHistory.useQuery(
+    { indicatorType: "ONRRP", limit: CONSECUTIVE_DAYS + 1 },
+    { refetchOnWindowFocus: false }
+  );
+  const { data: discountHistory } = trpc.indicators.getRecentHistory.useQuery(
+    { indicatorType: "DISCOUNT_WINDOW", limit: CONSECUTIVE_DAYS + 1 },
+    { refetchOnWindowFocus: false }
+  );
+  const { data: srfHistory } = trpc.indicators.getRecentHistory.useQuery(
+    { indicatorType: "SRF", limit: 2 },
+    { refetchOnWindowFocus: false }
+  );
+
+  // ── 计算 5 个信号灯 ────────────────────────────────────────────────────────
+  const getInd = (type: string) => indicators?.find((i: any) => i.indicatorType === type) as any;
+
+  // Rule 1：SOFR > OBFR（两者均有数据才判断，否则"数据不足"）
+  const sofrVal = parseFloat(getInd("SOFR")?.currentValue ?? "NaN");
+  const obfrVal = parseFloat(getInd("OBFR")?.currentValue ?? "NaN");
+  const sofrAlert: AlertSignal = !isNaN(sofrVal) && !isNaN(obfrVal)
+    ? {
+        triggered: sofrVal > obfrVal,
+        label: "SIGNAL",
+        reason: sofrVal > obfrVal ? `SOFR>${obfrVal.toFixed(2)}%` : `SOFR≤OBFR`,
+      }
+    : { triggered: false, label: "SIGNAL", reason: "数据不足" };
+
+  // Rule 2：RESERVE_BALANCES < 3,000,000 百万美元（即 3 万亿美元）
+  const reserveVal = parseFloat(getInd("RESERVE_BALANCES")?.currentValue ?? "NaN");
+  const reserveAlert: AlertSignal = !isNaN(reserveVal)
+    ? {
+        triggered: reserveVal < 3_000_000,
+        label: "SIGNAL",
+        reason: reserveVal < 3_000_000 ? `低于3万亿阈值` : `高于3万亿`,
+      }
+    : { triggered: false, label: "SIGNAL", reason: "数据不足" };
+
+  // Rule 3：ONRRP 连续 CONSECUTIVE_DAYS 天下降
+  const onrrpSignal = checkConsecutiveDecline(onrrpHistory as any, CONSECUTIVE_DAYS);
+  const onrrpAlert: AlertSignal = { ...onrrpSignal, label: "SIGNAL" };
+
+  // Rule 4：DISCOUNT_WINDOW 连续 CONSECUTIVE_DAYS 天上升
+  const discountSignal = checkConsecutiveRise(discountHistory as any, CONSECUTIVE_DAYS);
+  const discountAlert: AlertSignal = { ...discountSignal, label: "SIGNAL" };
+
+  // Rule 5：SRF 单日绝对跳升 > SRF_SURGE_THRESHOLD 百万美元（方案A）
+  const srfCurrent = parseFloat((srfHistory as any)?.[0]?.value ?? "NaN");
+  const srfPrev = parseFloat((srfHistory as any)?.[1]?.value ?? "NaN");
+  const srfDiff = srfCurrent - srfPrev;
+  const srfAlert: AlertSignal = !isNaN(srfCurrent) && !isNaN(srfPrev)
+    ? {
+        triggered: srfDiff > SRF_SURGE_THRESHOLD,
+        label: "SIGNAL",
+        reason: srfDiff > SRF_SURGE_THRESHOLD ? `单日+${(srfDiff / 1000).toFixed(0)}B暴增` : `用量正常`,
+      }
+    : { triggered: false, label: "SIGNAL", reason: "数据不足" };
+
+  // 信号灯映射表：indicatorType → AlertSignal
+  const alertSignals: Record<string, AlertSignal> = {
+    SOFR:             sofrAlert,
+    RESERVE_BALANCES: reserveAlert,
+    ONRRP:            onrrpAlert,
+    DISCOUNT_WINDOW:  discountAlert,
+    SRF:              srfAlert,
+  };
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -368,6 +471,7 @@ export default function Dashboard() {
                         indicatorType={item.indicatorType}
                         accentColor={accent as "green" | "navy" | "gold" | "silver"}
                         sourceUrl={SOURCE_URLS[item.indicatorType]}
+                        alertSignal={alertSignals[item.indicatorType]}
                       />
                     </div>
                   ))}

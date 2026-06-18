@@ -15,6 +15,12 @@ export interface StaticHistoryRecord {
   unit: string;
 }
 
+export interface AlertSignal {
+  triggered: boolean;
+  label: string;   // e.g. "SIGNAL"
+  reason: string;  // e.g. "连续3天下降"
+}
+
 interface CompactIndicatorCardProps {
   title: string;
   shortTitle: string;
@@ -32,6 +38,7 @@ interface CompactIndicatorCardProps {
   accentColor?: "green" | "navy" | "gold" | "silver";
   sourceUrl?: string;
   hideHistory?: boolean;
+  alertSignal?: AlertSignal;
 }
 
 // ─── 强调色配置（CME 风格）────────────────────────────────────────────────────
@@ -87,6 +94,7 @@ export function CompactIndicatorCard({
   accentColor = "green",
   sourceUrl,
   hideHistory,
+  alertSignal,
 }: CompactIndicatorCardProps) {
   const [showDetail, setShowDetail] = useState(false);
   const accent = ACCENT[accentColor] ?? ACCENT.green;
@@ -131,13 +139,40 @@ export function CompactIndicatorCard({
                 {shortTitle}
               </div>
             </div>
-            {/* 风险徽章 */}
-            <span
-              className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
-              style={{ ...MONO, fontSize: "10px", letterSpacing: "0.08em", background: risk.badgeBg, color: risk.badgeText, border: `1px solid ${risk.badgeBorder}` }}
-            >
-              {risk.label}
-            </span>
+            {/* 右上角徽章区：alert signal（如有）+ 风险等级 */}
+            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+              {/* 信号灯徽章 — 仅对配置了 alertSignal 的指标显示 */}
+              {alertSignal && (
+                <div className="flex flex-col items-end gap-0.5">
+                  <span
+                    className="font-bold px-2 py-0.5 rounded flex-shrink-0"
+                    style={{
+                      ...MONO,
+                      fontSize: "10px",
+                      letterSpacing: "0.08em",
+                      background: alertSignal.triggered ? "#FFEBEE" : "#E8F5EE",
+                      color: alertSignal.triggered ? "#C62828" : "#007A3D",
+                      border: `1px solid ${alertSignal.triggered ? "#FFCDD2" : "#B2DFCC"}`,
+                    }}
+                  >
+                    {alertSignal.triggered ? "⚠ SIGNAL" : "● OK"}
+                  </span>
+                  {/* 触发原因简述（仅 triggered 时显示） */}
+                  {alertSignal.triggered && (
+                    <span style={{ ...MONO, fontSize: "9px", color: "#C62828", letterSpacing: "0.04em", textAlign: "right", lineHeight: 1.2 }}>
+                      {alertSignal.reason}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* 风险等级徽章 */}
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                style={{ ...MONO, fontSize: "10px", letterSpacing: "0.08em", background: risk.badgeBg, color: risk.badgeText, border: `1px solid ${risk.badgeBorder}` }}
+              >
+                {risk.label}
+              </span>
+            </div>
           </div>
 
           {/* 分隔线 */}
