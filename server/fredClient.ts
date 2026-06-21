@@ -79,7 +79,7 @@ export const FRED_INDICATORS = {
   SRF: {
     seriesId: "RPONTSYD",
     name: "常备回购便利",
-    unit: "百万美元",
+    unit: "十亿美元",
     frequency: "daily",
     group: "流动性工具使用",
   },

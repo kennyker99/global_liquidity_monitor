@@ -67,8 +67,8 @@ const CME_RISK_DESC: Record<string, string> = {
 // ─── 信号灯配置 ──────────────────────────────────────────────────────────────
 // Rule 3 & 4：连续天数阈值（3 = 过去 3 天每天都比前一天低/高才触发）
 const CONSECUTIVE_DAYS = 3;
-// Rule 5：SRF 单日绝对值跳升阈值（方案A，单位：百万美元，50_000 = 500亿美元）
-const SRF_SURGE_THRESHOLD = 50_000;
+// Rule 5：SRF 单日绝对值跳升阈值（方案A，单位：十亿美元，50 = 500亿美元）
+const SRF_SURGE_THRESHOLD = 50;
 
 /** Rule 3 辅助：检查历史数据是否连续 N 天下降（history 按日期降序） */
 function checkConsecutiveDecline(
