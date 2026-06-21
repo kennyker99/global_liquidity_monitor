@@ -67,8 +67,6 @@ const CME_RISK_DESC: Record<string, string> = {
 // ─── 信号灯配置 ──────────────────────────────────────────────────────────────
 // Rule 3 & 4：连续天数阈值（3 = 过去 3 天每天都比前一天低/高才触发）
 const CONSECUTIVE_DAYS = 3;
-// Rule 5：SRF 单日绝对值跳升阈值（方案A，单位：十亿美元，50 = 500亿美元）
-const SRF_SURGE_THRESHOLD = 50;
 
 /** Rule 3 辅助：检查历史数据是否连续 N 天下降（history 按日期降序） */
 function checkConsecutiveDecline(
@@ -125,12 +123,7 @@ export default function Dashboard() {
     { indicatorType: "DISCOUNT_WINDOW", limit: CONSECUTIVE_DAYS + 1 },
     { refetchOnWindowFocus: false }
   );
-  const { data: srfHistory } = trpc.indicators.getRecentHistory.useQuery(
-    { indicatorType: "SRF", limit: 2 },
-    { refetchOnWindowFocus: false }
-  );
-
-  // ── 计算 5 个信号灯 ────────────────────────────────────────────────────────
+  // ── 计算 4 个信号灯 ────────────────────────────────────────────────────────
   const getInd = (type: string) => indicators?.find((i: any) => i.indicatorType === type) as any;
 
   // Rule 1：SOFR > OBFR（两者均有数据才判断，否则"数据不足"）
@@ -162,25 +155,12 @@ export default function Dashboard() {
   const discountSignal = checkConsecutiveRise(discountHistory as any, CONSECUTIVE_DAYS);
   const discountAlert: AlertSignal = { ...discountSignal, label: "SIGNAL" };
 
-  // Rule 5：SRF 单日绝对跳升 > SRF_SURGE_THRESHOLD 百万美元（方案A）
-  const srfCurrent = parseFloat((srfHistory as any)?.[0]?.value ?? "NaN");
-  const srfPrev = parseFloat((srfHistory as any)?.[1]?.value ?? "NaN");
-  const srfDiff = srfCurrent - srfPrev;
-  const srfAlert: AlertSignal = !isNaN(srfCurrent) && !isNaN(srfPrev)
-    ? {
-        triggered: srfDiff > SRF_SURGE_THRESHOLD,
-        label: "SIGNAL",
-        reason: srfDiff > SRF_SURGE_THRESHOLD ? `单日+${(srfDiff / 1000).toFixed(0)}B暴增` : `用量正常`,
-      }
-    : { triggered: false, label: "SIGNAL", reason: "数据不足" };
-
   // 信号灯映射表：indicatorType → AlertSignal
   const alertSignals: Record<string, AlertSignal> = {
     SOFR:             sofrAlert,
     RESERVE_BALANCES: reserveAlert,
     ONRRP:            onrrpAlert,
     DISCOUNT_WINDOW:  discountAlert,
-    SRF:              srfAlert,
   };
 
   useEffect(() => {
