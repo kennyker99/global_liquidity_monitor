@@ -43,11 +43,19 @@ export const appRouter = router({
     // 返回统一格式：{ symbol, name, price, change, changePercent, updatedAt }
     getMOVE: publicProcedure.query(async (): Promise<MOVEQuote | null> => {
       console.log("[Router][getMOVE] 收到请求，开始服务端抓取 MOVE...");
-      // 1) 先尝试实时抓取
-      const live = await fetchMOVEQuote();
-      if (live) {
-        // 写入内存缓存，供后续回退
-        memoryCache.set("MOVE", {
+
+      const toMOVEQuote = (price: number, change: number | null, changePercent: number | null, updatedAt: string): MOVEQuote => ({
+        symbol: "^MOVE",
+        name: "MOVE Index",
+        price,
+        change,
+        changePercent,
+        updatedAt,
+      });
+
+      const cacheAndSave = async (live: MOVEQuote) => {
+        const riskLevel = live.price > 120 ? "warning" : live.price > 80 ? "caution" : "normal";
+        const row = {
           indicatorType: "MOVE",
           id: "MOVE",
           currentValue: String(live.price),
@@ -56,13 +64,38 @@ export const appRouter = router({
           changePercent: live.changePercent !== null ? String(live.changePercent) : "0",
           unit: "bps",
           observationDate: live.updatedAt,
-          riskLevel:
-            live.price > 120 ? "warning" : live.price > 80 ? "caution" : "normal",
+          riskLevel,
           riskDescription: "衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张",
           dataSource: "Yahoo Finance",
           lastUpdatedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
-        });
+        };
+        memoryCache.set("MOVE", row);
+        // 同时写入 DB，确保重启后也有数据可用
+        try {
+          await upsertIndicator({
+            indicatorType: "MOVE",
+            fredSeriesId: null,
+            observationDate: live.updatedAt,
+            currentValue: String(live.price),
+            previousValue: live.change !== null ? String(live.price - live.change) : null,
+            changeValue: live.change !== null ? String(live.change) : "0",
+            changePercent: live.changePercent !== null ? String(live.changePercent) : "0",
+            unit: "bps",
+            frequency: "daily",
+            riskLevel,
+            riskDescription: "衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张",
+            dataSource: "Yahoo Finance",
+          });
+        } catch (dbErr) {
+          console.warn("[Router][getMOVE] DB 写入失败（不影响返回）:", (dbErr as Error).message);
+        }
+      };
+
+      // 1) 先尝试实时抓取
+      const live = await fetchMOVEQuote();
+      if (live) {
+        await cacheAndSave(live);
         console.log("[Router][getMOVE] 实时抓取成功，返回:", JSON.stringify(live));
         return live;
       }
@@ -71,21 +104,35 @@ export const appRouter = router({
       const cached = memoryCache.get("MOVE");
       if (cached && cached.currentValue) {
         const price = parseFloat(String(cached.currentValue));
-        const changeValue = cached.changeValue ? parseFloat(String(cached.changeValue)) : null;
-        const changePercent = cached.changePercent ? parseFloat(String(cached.changePercent)) : null;
-        const fallback: MOVEQuote = {
-          symbol: "^MOVE",
-          name: "MOVE Index",
+        const fallback = toMOVEQuote(
           price,
-          change: changeValue && changeValue !== 0 ? changeValue : null,
-          changePercent: changePercent && changePercent !== 0 ? changePercent : null,
-          updatedAt: String(cached.observationDate ?? cached.lastUpdatedAt ?? ""),
-        };
-        console.log("[Router][getMOVE] 实时失败，使用内存缓存回退:", JSON.stringify(fallback));
+          cached.changeValue ? parseFloat(String(cached.changeValue)) || null : null,
+          cached.changePercent ? parseFloat(String(cached.changePercent)) || null : null,
+          String(cached.observationDate ?? cached.lastUpdatedAt ?? ""),
+        );
+        console.log("[Router][getMOVE] 使用内存缓存回退:", JSON.stringify(fallback));
         return fallback;
       }
 
-      console.error("[Router][getMOVE] 实时和缓存都没有 MOVE 数据，返回 null");
+      // 3) 内存缓存也没有 → 读 DB（重启后的持久化回退）
+      try {
+        const dbRecord = await getIndicatorByType("MOVE");
+        if (dbRecord && dbRecord.currentValue) {
+          const price = parseFloat(String(dbRecord.currentValue));
+          const fallback = toMOVEQuote(
+            price,
+            dbRecord.changeValue ? parseFloat(String(dbRecord.changeValue)) || null : null,
+            dbRecord.changePercent ? parseFloat(String(dbRecord.changePercent)) || null : null,
+            String(dbRecord.observationDate ?? dbRecord.lastUpdatedAt ?? ""),
+          );
+          console.log("[Router][getMOVE] 使用 DB 回退:", JSON.stringify(fallback));
+          return fallback;
+        }
+      } catch (dbErr) {
+        console.warn("[Router][getMOVE] DB 读取失败:", (dbErr as Error).message);
+      }
+
+      console.error("[Router][getMOVE] 三层 fallback 全部失败，返回 null");
       return null;
     }),
 
