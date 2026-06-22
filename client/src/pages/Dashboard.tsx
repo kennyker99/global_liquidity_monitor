@@ -513,7 +513,7 @@ export default function Dashboard() {
 
             {/* ── 风险指标列（VIX / MOVE / US 5Y CDS）── */}
             <div className="flex flex-col gap-3">
-              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).filter((it: any) => it.indicatorType !== "MOVE").length + (move.data ? 1 : 0)} />
+              <GroupHeader label="RISK INDICATORS" labelCN="风险指标" accent="red" count={(grouped["风险指标"] ?? []).filter((it: any) => it.indicatorType !== "MOVE").length + 1} />
               {(grouped["风险指标"] ?? []).filter((it: any) => it.indicatorType !== "MOVE").map((item: any, i: number) => (
                 <div key={item.id} className="animate-slide-up" style={{ animationDelay: `${(4 * 5 + i) * 50}ms` }}>
                   <CompactIndicatorCard
@@ -536,27 +536,29 @@ export default function Dashboard() {
                   />
                 </div>
               ))}
-              {/* MOVE 指数 — 前端直接从 Yahoo Finance 获取 */}
-              {move.data && (
-                <div className="animate-slide-up">
-                  <CompactIndicatorCard
-                    title="MOVE 债券波动率指数"
-                    shortTitle="MOVE"
-                    currentValue={move.data.value}
-                    unit="bps"
-                    changeValue={move.data.changeValue}
-                    changePercent={move.data.changePercent}
-                    riskLevel={parseFloat(move.data.value) > 120 ? "warning" : parseFloat(move.data.value) > 80 ? "caution" : "normal"}
-                    riskDescription="衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张"
-                    lastUpdatedAt={move.data.date}
-                    group="RISK INDICATORS"
-                    indicatorType="MOVE"
-                    accentColor={"red" as any}
-                    sourceUrl="https://finance.yahoo.com/quote/%5EMOVE/"
-                    hideHistory
-                  />
-                </div>
-              )}
+              {/* MOVE 指数 — 服务端经 tRPC 从 Yahoo Finance 获取，抓取失败时显示 N/A */}
+              <div className="animate-slide-up">
+                <CompactIndicatorCard
+                  title="MOVE 债券波动率指数"
+                  shortTitle="MOVE"
+                  currentValue={move.isLoading ? "—" : move.data ? move.data.value : "N/A"}
+                  unit="bps"
+                  changeValue={move.data?.changeValue}
+                  changePercent={move.data?.changePercent}
+                  riskLevel={
+                    move.data
+                      ? parseFloat(move.data.value) > 120 ? "warning" : parseFloat(move.data.value) > 80 ? "caution" : "normal"
+                      : "normal"
+                  }
+                  riskDescription="衡量美国国债市场隐含波动率，低于80正常，超过120高度紧张"
+                  lastUpdatedAt={move.data?.date ?? ""}
+                  group="RISK INDICATORS"
+                  indicatorType="MOVE"
+                  accentColor={"red" as any}
+                  sourceUrl="https://finance.yahoo.com/quote/%5EMOVE/"
+                  hideHistory
+                />
+              </div>
               {/* 占位提示 */}
               {(grouped["风险指标"] ?? []).length === 0 && !move.data && !move.isLoading && (
                 <div className="flex flex-col gap-2">
