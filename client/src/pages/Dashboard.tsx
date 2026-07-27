@@ -98,6 +98,17 @@ function checkConsecutiveRise(
   return { triggered: true, reason: `连续${days}天上升` };
 }
 
+/** 格式化指标数值显示：去掉多余的尾随零（如 "4885.0000000000" → "4,885"）。
+ *  整数加千分位；小数最多保留 4 位有效小数并去掉尾零。 */
+function formatDisplayValue(raw: string): string {
+  const n = parseFloat(raw);
+  if (isNaN(n)) return raw;
+  if (Number.isInteger(n)) return n.toLocaleString("en-US");
+  // 小数：保留最多 4 位，再去掉尾随零
+  const trimmed = parseFloat(n.toFixed(4));
+  return trimmed.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
 const GROUPS = [
   { key: "货币市场利率", label: "MONEY MARKET",    labelCN: "货币市场利率", accent: "green"  },
   { key: "流动性工具",   label: "LIQUIDITY TOOLS", labelCN: "流动性工具",   accent: "navy"   },
@@ -437,7 +448,7 @@ export default function Dashboard() {
                       <CompactIndicatorCard
                         title={INDICATOR_META[item.indicatorType]?.title ?? item.indicatorType}
                         shortTitle={INDICATOR_META[item.indicatorType]?.short ?? item.indicatorType}
-                        currentValue={item.currentValue}
+                        currentValue={formatDisplayValue(item.currentValue)}
                         unit={item.unit}
                         changeValue={item.changeValue ? (() => {
                           const v = parseFloat(item.changeValue);
@@ -519,7 +530,7 @@ export default function Dashboard() {
                   <CompactIndicatorCard
                     title={INDICATOR_META[item.indicatorType]?.title ?? item.indicatorType}
                     shortTitle={INDICATOR_META[item.indicatorType]?.short ?? item.indicatorType}
-                    currentValue={item.currentValue}
+                    currentValue={formatDisplayValue(item.currentValue)}
                     unit={item.unit}
                     changeValue={item.changeValue ? (() => {
                       const v = parseFloat(item.changeValue);
