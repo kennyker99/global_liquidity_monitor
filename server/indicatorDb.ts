@@ -2,7 +2,7 @@
  * 流动性指标数据库操作函数
  */
 
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import {
   liquidityIndicators,
   indicatorHistory,
@@ -252,19 +252,14 @@ export async function getRecentHistoryRecords(
   }
 
   try {
-    // 获取所有记录并按观测日期降序排列
-    const results = await db
+        // 先按观测日期从新到旧排序，再在数据库中截取最新记录。
+    // 若先 LIMIT 再在应用端排序，随着历史超过 50 条，最新数据会永远被截掉。
+    return await db
       .select()
       .from(indicatorHistory)
       .where(eq(indicatorHistory.indicatorType, indicatorType))
-      .limit(50);
-
-    // 按 observationDate 降序排列，取最新的 N 条
-    const sorted = results
-      .sort((a, b) => b.observationDate.localeCompare(a.observationDate))
-      .slice(0, limit);
-
-    return sorted;
+      .orderBy(desc(indicatorHistory.observationDate))
+      .limit(limit);
   } catch (error) {
     console.error(`[Database] Failed to get recent history for ${indicatorType}:`, error);
     throw error;
