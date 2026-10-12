@@ -7,7 +7,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { scheduleDataRefresh } from "../dataFetcher";
+import { scheduleCMEDataRefresh, scheduleDataRefresh } from "../dataFetcher";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -160,6 +160,7 @@ async function startServer() {
     scheduleDataRefresh(fredApiKey);
   } else {
     console.warn("[DataFetcher] FRED_API_KEY not set, skipping data refresh");
+    scheduleCMEDataRefresh();
   }
 }
 

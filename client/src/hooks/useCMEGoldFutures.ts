@@ -1,247 +1,96 @@
-/**
- * 前端直接调用 CME API 获取贵金属期货数据
- * CME 产品 ID 437 = 黄金期货 (GC/COMEX)
- * CME 产品 ID 458 = 白银期货 (SI/COMEX)  [通过拦截 silver.volume.html 网络请求确认]
- *   (注：84 是旧的/错误的 ID，会返回 empty:true)
- */
+/** COMEX data read from the server-side CME Daily Bulletin refresh. */
 
-import { useState, useEffect } from "react";
+import { trpc } from "@/lib/trpc";
 
 export interface CMEGoldDayData {
-  date: string; // YYYY-MM-DD
+  date: string;
   efp: number;
   efr: number;
   tas: number;
   deliveries: number;
 }
 
-export interface CMESilverDayData {
-  date: string; // YYYY-MM-DD
-  efp: number;
-  efr: number;
-  tas: number;
-  deliveries: number;
-}
+export interface CMESilverDayData extends CMEGoldDayData {}
 
-export interface CMEGoldFuturesState {
-  history: CMEGoldDayData[]; // 最近 6 个交易日，升序
-  latest: CMEGoldDayData | null;
-  previous: CMEGoldDayData | null;
+interface CMEFuturesState<T> {
+  history: T[];
+  latest: T | null;
+  previous: T | null;
   isLoading: boolean;
   error: string | null;
-  lastFetched: Date | null;
+  lastFetched?: Date | null;
 }
 
-export interface CMESilverFuturesState {
-  history: CMESilverDayData[];
-  latest: CMESilverDayData | null;
-  previous: CMESilverDayData | null;
-  isLoading: boolean;
-  error: string | null;
+type IndicatorRow = {
+  indicatorType: string;
+  currentValue: string | number | null;
+  previousValue: string | number | null;
+  observationDate: string | Date | null;
+};
+
+function toNumber(value: string | number | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseIntSafe(val: string | undefined): number {
-  if (!val || val === "-") return 0;
-  return parseInt(val.replace(/,/g, ""), 10) || 0;
+function readMetal<T extends CMEGoldDayData>(
+  rows: IndicatorRow[] | undefined,
+  prefix: "GOLD" | "SILVER"
+): CMEFuturesState<T> {
+  const types = [`${prefix}_EFP`, `${prefix}_EFR`, `${prefix}_TAS`, `${prefix}_DELIVERIES`];
+  const records = types.map((type) => rows?.find((row) => row.indicatorType === type));
+  const dateValues = records.map((record) => record?.observationDate).filter(Boolean);
+  const date = dateValues.length
+    ? String(dateValues.sort((a, b) => String(a).localeCompare(String(b))).at(-1)).slice(0, 10)
+    : "";
+  const current = records.map((record) => toNumber(record?.currentValue ?? null));
+  const previous = records.map((record) => toNumber(record?.previousValue ?? null));
+  const hasLatest = date !== "" && current.every((value) => value !== undefined);
+  const latest = hasLatest
+    ? ({ date, efp: current[0]!, efr: current[1]!, tas: current[2]!, deliveries: current[3]! } as T)
+    : null;
+  const hasPrevious = previous.every((value) => value !== undefined);
+  const previousDay = hasPrevious
+    ? ({ date, efp: previous[0]!, efr: previous[1]!, tas: previous[2]!, deliveries: previous[3]! } as T)
+    : null;
+
+  return {
+    history: latest ? [latest] : [],
+    latest,
+    previous: previousDay,
+    isLoading: rows === undefined,
+    error: rows === undefined ? null : latest ? null : `暂无 CME ${prefix === "GOLD" ? "黄金" : "白银"}数据`,
+    lastFetched: latest ? new Date() : null,
+  };
 }
 
-function formatDateYYYYMMDD(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
-}
-
-function toISODate(yyyymmdd: string): string {
-  return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
-}
-
-function isWeekday(date: Date): boolean {
-  const day = date.getDay();
-  return day !== 0 && day !== 6;
-}
-
-/** 生成最近 N 个工作日（从昨天往前） */
-function getRecentWeekdays(n: number): string[] {
-  const days: string[] = [];
-  const cursor = new Date();
-  cursor.setDate(cursor.getDate() - 1);
-  while (days.length < n) {
-    if (isWeekday(cursor)) {
-      days.push(formatDateYYYYMMDD(new Date(cursor)));
-    }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return days;
-}
-
-/** 获取黄金期货单日数据 */
-async function fetchCMEGoldForDate(dateStr: string): Promise<CMEGoldDayData | null> {
-  try {
-    const url = `https://www.cmegroup.com/CmeWS/mvc/Volume/Details/F/437/${dateStr}/P?tradeDate=${dateStr}&pageSize=500&isProtected&_t=${Date.now()}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.empty || !data.totals) return null;
-    const t = data.totals;
-    const efp = parseIntSafe(t.efpVol);
-    const efr = parseIntSafe(t.efrVol);
-    const tas = parseIntSafe(t.tasVol);
-    const deliveries = parseIntSafe(t.deliveries);
-    if (efp === 0 && efr === 0 && tas === 0 && deliveries === 0) return null;
-    return { date: toISODate(dateStr), efp, efr, tas, deliveries };
-  } catch {
-    return null;
-  }
-}
-
-/** 获取白银期货单日数据（EFP/EFR/TAS/Deliveries） */
-async function fetchCMESilverForDate(dateStr: string): Promise<CMESilverDayData | null> {
-  try {
-    const url = `https://www.cmegroup.com/CmeWS/mvc/Volume/Details/F/458/${dateStr}/P?tradeDate=${dateStr}&pageSize=500&isProtected&_t=${Date.now()}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.empty || !data.totals) return null;
-    const t = data.totals;
-    const efp = parseIntSafe(t.efpVol);
-    const efr = parseIntSafe(t.efrVol);
-    const tas = parseIntSafe(t.tasVol);
-    const deliveries = parseIntSafe(t.deliveries);
-    // totals 存在即记录（即使全为 0）
-    return { date: toISODate(dateStr), efp, efr, tas, deliveries };
-  } catch {
-    return null;
-  }
-}
-
-/** 黄金期货 Hook */
-export function useCMEGoldFutures(): CMEGoldFuturesState {
-  const [state, setState] = useState<CMEGoldFuturesState>({
-    history: [],
-    latest: null,
-    previous: null,
-    isLoading: true,
-    error: null,
-    lastFetched: null,
+function useCMEIndicators() {
+  return trpc.indicators.getAll.useQuery(undefined, {
+    refetchInterval: 60 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchAll() {
-      setState((s) => ({ ...s, isLoading: true, error: null }));
-      try {
-        const candidates = getRecentWeekdays(12);
-        const results: CMEGoldDayData[] = [];
-
-        for (const dateStr of candidates) {
-          if (results.length >= 6) break;
-          const record = await fetchCMEGoldForDate(dateStr);
-          if (record) results.push(record);
-          await new Promise((r) => setTimeout(r, 150));
-        }
-
-        if (cancelled) return;
-
-        results.sort((a, b) => a.date.localeCompare(b.date));
-        const latest = results.length > 0 ? results[results.length - 1]! : null;
-        const previous = results.length > 1 ? results[results.length - 2]! : null;
-
-        setState({
-          history: results,
-          latest,
-          previous,
-          isLoading: false,
-          error: results.length === 0 ? "暂无 CME 黄金数据" : null,
-          lastFetched: new Date(),
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setState((s) => ({
-            ...s,
-            isLoading: false,
-            error: err instanceof Error ? err.message : "获取 CME 黄金数据失败",
-          }));
-        }
-      }
-    }
-
-    fetchAll();
-    return () => { cancelled = true; };
-  }, []);
-
-  return state;
 }
 
-/** 白银期货 Hook */
-export function useCMESilverFutures(): CMESilverFuturesState {
-  const [state, setState] = useState<CMESilverFuturesState>({
-    history: [],
-    latest: null,
-    previous: null,
-    isLoading: true,
-    error: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchAll() {
-      setState((s) => ({ ...s, isLoading: true, error: null }));
-      try {
-        const candidates = getRecentWeekdays(12);
-        const results: CMESilverDayData[] = [];
-
-        for (const dateStr of candidates) {
-          if (results.length >= 6) break;
-          const record = await fetchCMESilverForDate(dateStr);
-          if (record !== null) results.push(record);
-          await new Promise((r) => setTimeout(r, 150));
-        }
-
-        if (cancelled) return;
-
-        results.sort((a, b) => a.date.localeCompare(b.date));
-        const latest = results.length > 0 ? results[results.length - 1]! : null;
-        const previous = results.length > 1 ? results[results.length - 2]! : null;
-
-        setState({
-          history: results,
-          latest,
-          previous,
-          isLoading: false,
-          error: results.length === 0 ? "暂无 CME 白银数据" : null,
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setState((s) => ({
-            ...s,
-            isLoading: false,
-            error: err instanceof Error ? err.message : "获取 CME 白银数据失败",
-          }));
-        }
-      }
-    }
-
-    fetchAll();
-    return () => { cancelled = true; };
-  }, []);
-
-  return state;
+/** Gold metrics are now served from the Railway database, avoiding browser CORS. */
+export function useCMEGoldFutures(): CMEFuturesState<CMEGoldDayData> {
+  const query = useCMEIndicators();
+  return readMetal<CMEGoldDayData>(query.data as IndicatorRow[] | undefined, "GOLD");
 }
 
-/** 从 CME 历史数据中构建单个指标的历史记录（供 StaticHistoryTimeline 使用） */
+/** Silver metrics are now served from the Railway database, avoiding browser CORS. */
+export function useCMESilverFutures(): CMEFuturesState<CMESilverDayData> {
+  const query = useCMEIndicators();
+  return readMetal<CMESilverDayData>(query.data as IndicatorRow[] | undefined, "SILVER");
+}
+
+/** History for the detail modal; only the latest bulletin date is retained. */
 export function buildGoldIndicatorHistory(
   history: CMEGoldDayData[],
   field: "efp" | "efr" | "tas" | "deliveries",
   unit: string
 ) {
-  return history.map((d) => ({
-    observationDate: d.date,
-    value: String(d[field]),
-    unit,
-  }));
+  return history.map((day) => ({ observationDate: day.date, value: String(day[field]), unit }));
 }
 
 export function buildSilverIndicatorHistory(
@@ -249,9 +98,5 @@ export function buildSilverIndicatorHistory(
   field: "efp" | "efr" | "tas" | "deliveries",
   unit: string
 ) {
-  return history.map((d) => ({
-    observationDate: d.date,
-    value: String(d[field]),
-    unit,
-  }));
+  return history.map((day) => ({ observationDate: day.date, value: String(day[field]), unit }));
 }

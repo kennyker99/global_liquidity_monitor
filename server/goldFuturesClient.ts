@@ -1,36 +1,17 @@
 /**
- * CME 黄金期货交割数据获取
- * 数据源: https://www.cmegroup.com/CmeWS/mvc/Volume/Details/F/437/{YYYYMMDD}/P
- *
- * 获取关键指标（TOTALS 行）：
- * - EFP (Exchange for Physical): 期货现货互换
- * - EFR (Exchange for Risk): 风险互换
- * - TAS (Trade At Settlement): 结算时交易
- * - Deliveries: 交割量
- *
- * 注：CME 产品 ID 437 = 黄金期货 (GC)
+ * Read the latest COMEX gold and silver EFP/EFR/TAS/delivery totals from CME's
+ * public Daily Bulletin (PG62). The bulletin PDF is updated during the trading
+ * day and is accessible from Railway, unlike the page's browser-only API.
  */
 
 import axios from "axios";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 
-const CME_VOLUME_API =
-  "https://www.cmegroup.com/CmeWS/mvc/Volume/Details/F/437";
+const CME_METALS_BULLETIN_URL =
+  "https://www.cmegroup.com/daily_bulletin/current/Section62_Metals_Futures_Products.pdf";
+const BULLETIN_PAGE = 6;
 
-// 模拟浏览器请求头，避免被 CME 封锁
-const BROWSER_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  Referer: "https://www.cmegroup.com/markets/metals/precious/gold.volume.html",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Accept-Encoding": "gzip, deflate, br",
-  Connection: "keep-alive",
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "same-origin",
-};
-
-export interface GoldFuturesMetrics {
+export interface PreciousMetalMetrics {
   date: string;
   efp: number;
   efr: number;
@@ -38,191 +19,101 @@ export interface GoldFuturesMetrics {
   deliveries: number;
 }
 
-interface CMEVolumeTotals {
-  efpVol?: string;
-  efrVol?: string;
-  tasVol?: string;
-  deliveries?: string;
+export interface CMEPreciousMetalsSnapshot {
+  gold: PreciousMetalMetrics;
+  silver: PreciousMetalMetrics;
 }
 
-interface CMEVolumeResponse {
-  tradeDate?: string;
-  totals?: CMEVolumeTotals;
-  updateTime?: string;
-  empty?: boolean;
+interface PositionedText {
+  x: number;
+  text: string;
 }
 
-/**
- * 将数字字符串（如 "1,193"）转为整数
- */
-function parseIntSafe(val: string | undefined): number {
-  if (!val || val === "-") return 0;
-  return parseInt(val.replace(/,/g, ""), 10) || 0;
+function normalizeNumber(value: string | undefined): number {
+  if (!value || value === "---" || value === "-") return 0;
+  const parsed = Number(value.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/**
- * 格式化日期为 YYYYMMDD
- */
-function formatDateYYYYMMDD(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
+function getTradeDate(pageLines: Map<number, PositionedText[]>): string {
+  const text = Array.from(pageLines.values()).flat().map((item) => item.text).join(" ");
+  const match = text.match(
+    /(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})/
+  );
+  if (!match) throw new Error("CME bulletin trade date was not found");
+  const month = new Date(`${match[1]} 1, 2000 UTC`).getUTCMonth() + 1;
+  return `${match[3]}-${String(month).padStart(2, "0")}-${match[2].padStart(2, "0")}`;
 }
 
-/**
- * 判断是否为工作日（周一到周五）
- */
-function isWeekday(date: Date): boolean {
-  const day = date.getDay();
-  return day !== 0 && day !== 6;
-}
+function getContractTotals(
+  lines: Map<number, PositionedText[]>,
+  metal: "GOLD" | "SILVER"
+): Omit<PreciousMetalMetrics, "date"> {
+  const totals = { efp: 0, efr: 0, tas: 0, deliveries: 0 };
+  let inMetalSection = false;
+  let foundMetalSection = false;
 
-/**
- * 获取最近 N 个工作日的日期列表（从今天往前）
- */
-function getRecentTradingDays(n: number): Date[] {
-  const days: Date[] = [];
-  const today = new Date();
-  // 从昨天开始往前找（CME 数据通常是前一个交易日）
-  let cursor = new Date(today);
-  cursor.setDate(cursor.getDate() - 1);
+  for (const [, rawItems] of Array.from(lines.entries()).sort((a, b) => b[0] - a[0])) {
+    const items = [...rawItems].sort((a, b) => a.x - b.x);
+    const lineText = items.map((item) => item.text).join(" ").toUpperCase();
 
-  while (days.length < n) {
-    if (isWeekday(cursor)) {
-      days.push(new Date(cursor));
+    if (lineText.includes(`COMEX ${metal} FUTURES`)) {
+      inMetalSection = true;
+      foundMetalSection = true;
+      continue;
     }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return days;
-}
-
-/**
- * 从 CME 获取指定日期的黄金期货成交量数据
- * 返回 null 表示该日期无数据（节假日或数据未发布）
- */
-export async function fetchCMEGoldVolumeForDate(
-  date: Date
-): Promise<GoldFuturesMetrics | null> {
-  const dateStr = formatDateYYYYMMDD(date);
-  const isoDate = date.toISOString().split("T")[0];
-
-  try {
-    const url = `${CME_VOLUME_API}/${dateStr}/P`;
-    const response = await axios.get<CMEVolumeResponse>(url, {
-      headers: BROWSER_HEADERS,
-      params: {
-        tradeDate: dateStr,
-        pageSize: 500,
-        isProtected: "",
-        _t: Date.now(),
-      },
-      timeout: 15000,
-    });
-
-    const data = response.data;
-
-    // 检查是否有数据
-    if (data.empty || !data.totals) {
-      console.log(`[GoldFutures] No data for ${dateStr} (empty or no totals)`);
-      return null;
+    const isContractRow = /^[A-Z]{3}\d{2}$/.test(items[0]?.text.trim() ?? "");
+    if (inMetalSection && !isContractRow && !lineText.startsWith("TOTAL")) break;
+    if (!inMetalSection || !isContractRow) {
+      continue;
     }
 
-    const totals = data.totals;
-    const efp = parseIntSafe(totals.efpVol);
-    const efr = parseIntSafe(totals.efrVol);
-    const tas = parseIntSafe(totals.tasVol);
-    const deliveries = parseIntSafe(totals.deliveries);
-
-    // 如果所有值都是 0，可能是节假日或无数据
-    if (efp === 0 && efr === 0 && tas === 0 && deliveries === 0) {
-      console.log(`[GoldFutures] All zeros for ${dateStr}, skipping`);
-      return null;
+    for (const item of items.slice(1)) {
+      const value = normalizeNumber(item.text.trim());
+      if (item.x >= 55 && item.x < 90) totals.deliveries += value;
+      else if (item.x >= 140 && item.x < 180) totals.efp += value;
+      else if (item.x >= 305 && item.x < 350) totals.efr += value;
+      else if (item.x >= 495 && item.x < 545) totals.tas += value;
     }
-
-    console.log(
-      `[GoldFutures] Fetched ${dateStr}: EFP=${efp}, EFR=${efr}, TAS=${tas}, Deliveries=${deliveries}`
-    );
-
-    return {
-      date: isoDate,
-      efp,
-      efr,
-      tas,
-      deliveries,
-    };
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      console.log(`[GoldFutures] No data for ${dateStr} (404)`);
-      return null;
-    }
-    console.error(`[GoldFutures] Error fetching ${dateStr}:`, error);
-    return null;
-  }
-}
-
-/**
- * 获取最近 N 个交易日的黄金期货数据
- */
-export async function getGoldFuturesHistory(
-  days: number = 6
-): Promise<GoldFuturesMetrics[]> {
-  // 多取几天以防节假日
-  const tradingDays = getRecentTradingDays(days + 10);
-  const results: GoldFuturesMetrics[] = [];
-
-  for (const day of tradingDays) {
-    if (results.length >= days) break;
-    const metrics = await fetchCMEGoldVolumeForDate(day);
-    if (metrics) {
-      results.push(metrics);
-    }
-    // 避免请求过快
-    await new Promise((r) => setTimeout(r, 300));
   }
 
-  // 按日期升序排列
-  return results.sort((a, b) => a.date.localeCompare(b.date));
+  if (!foundMetalSection) throw new Error(`COMEX ${metal} section not found in CME bulletin`);
+  return totals;
 }
 
-/**
- * 获取最新的黄金期货关键指标（最近一个有数据的交易日）
- */
-export async function getLatestGoldFuturesMetrics(): Promise<{
-  date: string;
-  efp: number;
-  efr: number;
-  tas: number;
-  deliveries: number;
-  previousEFP?: number;
-  previousEFR?: number;
-  previousTAS?: number;
-  previousDeliveries?: number;
-} | null> {
-  try {
-    const history = await getGoldFuturesHistory(2);
+/** Fetch and parse the latest public CME PG62 bulletin. */
+export async function fetchLatestCMEPreciousMetals(): Promise<CMEPreciousMetalsSnapshot> {
+  const response = await axios.get<ArrayBuffer>(CME_METALS_BULLETIN_URL, {
+    responseType: "arraybuffer",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; GlobalLiquidityMonitor/1.0)",
+      Accept: "application/pdf,*/*",
+    },
+    timeout: 30000,
+  });
 
-    if (!history || history.length === 0) {
-      console.error("[GoldFutures] No data available");
-      return null;
-    }
-
-    const latest = history[history.length - 1]!;
-    const previous = history.length > 1 ? history[history.length - 2] : null;
-
-    return {
-      date: latest.date,
-      efp: latest.efp,
-      efr: latest.efr,
-      tas: latest.tas,
-      deliveries: latest.deliveries,
-      previousEFP: previous?.efp,
-      previousEFR: previous?.efr,
-      previousTAS: previous?.tas,
-      previousDeliveries: previous?.deliveries,
-    };
-  } catch (error) {
-    console.error("[GoldFutures] Failed to get latest metrics:", error);
-    return null;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(response.data) }).promise;
+  if (pdf.numPages < BULLETIN_PAGE) {
+    throw new Error(`Unexpected CME metals bulletin: ${pdf.numPages} pages`);
   }
+
+  const page = await pdf.getPage(BULLETIN_PAGE);
+  const content = await page.getTextContent();
+  const lines = new Map<number, PositionedText[]>();
+  for (const item of content.items) {
+    if (!("str" in item) || !item.str.trim()) continue;
+    const y = Math.round(item.transform[5]);
+    const line = lines.get(y) ?? [];
+    line.push({ x: Math.round(item.transform[4]), text: item.str });
+    lines.set(y, line);
+  }
+
+  const date = getTradeDate(lines);
+  const gold = { date, ...getContractTotals(lines, "GOLD") };
+  const silver = { date, ...getContractTotals(lines, "SILVER") };
+  console.log(
+    `[CME Bulletin] ${date}: Gold EFP=${gold.efp} EFR=${gold.efr} TAS=${gold.tas} deliveries=${gold.deliveries}; ` +
+      `Silver EFP=${silver.efp} EFR=${silver.efr} TAS=${silver.tas} deliveries=${silver.deliveries}`
+  );
+  return { gold, silver };
 }

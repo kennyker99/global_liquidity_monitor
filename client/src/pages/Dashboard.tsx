@@ -236,7 +236,7 @@ export default function Dashboard() {
       changePercent: String(parseFloat(changePercent).toFixed(2)),
       riskLevel: "normal" as const,
       riskDescription: CME_RISK_DESC[type]!,
-      lastUpdatedAt: useCME ? (latest?.date ?? "") : (dbRecord?.lastUpdatedAt ? String(dbRecord.lastUpdatedAt) : ""),
+      lastUpdatedAt: dbRecord?.lastUpdatedAt ? String(dbRecord.lastUpdatedAt) : (latest?.date ?? ""),
       history: useCME ? buildGoldIndicatorHistory(gold.history, field, unit) : undefined,
       isLoading: gold.isLoading,
     };
@@ -249,6 +249,7 @@ export default function Dashboard() {
   ) {
     const latest = silver.latest;
     const previous = silver.previous;
+    const dbRecord = indicators?.find((i: any) => i.indicatorType === type) as any;
     const useCME = !silver.isLoading && latest !== null;
 
     const currVal = useCME ? latest![field] : null;
@@ -283,7 +284,7 @@ export default function Dashboard() {
       changePercent: String(parseFloat(changePercent).toFixed(2)),
       riskLevel: "normal" as const,
       riskDescription: CME_RISK_DESC[type]!,
-      lastUpdatedAt: useCME ? (latest?.date ?? "") : "",
+      lastUpdatedAt: dbRecord?.lastUpdatedAt ? String(dbRecord.lastUpdatedAt) : (latest?.date ?? ""),
       history: useCME ? buildSilverIndicatorHistory(silver.history, field, unit) : undefined,
       isLoading: silver.isLoading,
     };

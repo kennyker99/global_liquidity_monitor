@@ -10,13 +10,14 @@ import {
 } from "./fredClient";
 import { InsertIndicatorHistory } from "../drizzle/schema";
 import {
+  getIndicatorByType,
   upsertIndicator,
   addHistoryRecord,
   upsertHistoryRecord,
   logDataUpdate,
 } from "./indicatorDb";
 import { InsertLiquidityIndicator } from "../drizzle/schema";
-import { getLatestGoldFuturesMetrics, getGoldFuturesHistory } from "./goldFuturesClient";
+import { fetchLatestCMEPreciousMetals } from "./goldFuturesClient";
 import { fetchVIX, fetchVIXHistory, fetchMOVE, fetchCDS, fetchCDSHistory } from "./riskIndicatorsClient";
 import { memoryCache } from "./memoryCache";
 
@@ -160,60 +161,39 @@ export async function fetchAllIndicators(
 }
 
 /**
- * 获取黄金期货指标（来自 CME，非 FRED）
- * 抓取最近 6 个交易日数据，存储历史记录，并计算变化量
+ * 从 CME Daily Bulletin 获取最新黄金、白银期货指标。
  */
 export async function fetchGoldFuturesIndicators(): Promise<{
   successful: number;
   failed: number;
 }> {
   try {
-    console.log("[DataFetcher] Fetching CME gold futures data...");
-    // 获取最近 6 个交易日的历史数据
-    const history = await getGoldFuturesHistory(6);
-
-    if (!history || history.length === 0) {
-      console.error("[DataFetcher] No CME gold futures data available");
-      return { successful: 0, failed: 4 };
-    }
-
-    const latest = history[history.length - 1]!;
-    const previous = history.length > 1 ? history[history.length - 2] : null;
-
-    const goldIndicators = [
-      {
-        type: "GOLD_EFP",
-        value: latest.efp,
-        previousValue: previous?.efp,
-        unit: "合约数",
-      },
-      {
-        type: "GOLD_EFR",
-        value: latest.efr,
-        previousValue: previous?.efr,
-        unit: "合约数",
-      },
-      {
-        type: "GOLD_TAS",
-        value: latest.tas,
-        previousValue: previous?.tas,
-        unit: "合约数",
-      },
-      {
-        type: "GOLD_DELIVERIES",
-        value: latest.deliveries,
-        previousValue: previous?.deliveries,
-        unit: "1 Unit = 100 Ounce",
-      },
-    ];
+    console.log("[DataFetcher] Fetching latest CME precious-metals bulletin...");
+    const snapshot = await fetchLatestCMEPreciousMetals();
+    const indicators = [
+      { prefix: "GOLD", metrics: snapshot.gold, deliveryUnit: "1 Unit = 100 Ounce" },
+      { prefix: "SILVER", metrics: snapshot.silver, deliveryUnit: "1 Unit = 5000 Ounce" },
+    ].flatMap(({ prefix, metrics, deliveryUnit }) => [
+      { type: `${prefix}_EFP`, value: metrics.efp, unit: "合约数", date: metrics.date },
+      { type: `${prefix}_EFR`, value: metrics.efr, unit: "合约数", date: metrics.date },
+      { type: `${prefix}_TAS`, value: metrics.tas, unit: "合约数", date: metrics.date },
+      { type: `${prefix}_DELIVERIES`, value: metrics.deliveries, unit: deliveryUnit, date: metrics.date },
+    ]);
 
     let successful = 0;
     let failed = 0;
 
-    for (const indicator of goldIndicators) {
+    for (const indicator of indicators) {
       try {
         const currentVal = indicator.value;
-        const previousVal = indicator.previousValue;
+        const existing = await getIndicatorByType(indicator.type);
+        const previousVal = existing
+          ? existing.observationDate !== indicator.date
+            ? Number(existing.currentValue)
+            : existing.previousValue === null
+              ? undefined
+              : Number(existing.previousValue)
+          : undefined;
         let change = 0;
         let changePercent = 0;
 
@@ -228,9 +208,9 @@ export async function fetchGoldFuturesIndicators(): Promise<{
         const indicatorData: InsertLiquidityIndicator = {
           indicatorType: indicator.type,
           fredSeriesId: null,
-          observationDate: latest.date,
+          observationDate: indicator.date,
           currentValue: String(currentVal),
-          previousValue: previousVal !== undefined ? String(previousVal) : null,
+          previousValue: previousVal !== undefined && Number.isFinite(previousVal) ? String(previousVal) : null,
           changeValue: String(change),
           changePercent: String(changePercent),
           unit: indicator.unit,
@@ -242,20 +222,12 @@ export async function fetchGoldFuturesIndicators(): Promise<{
 
         await upsertIndicator(indicatorData);
 
-        // 存储所有历史记录（去重）
-        for (const record of history) {
-          await upsertHistoryRecord({
-            indicatorType: indicator.type,
-            observationDate: record.date,
-            value: String(
-              indicator.type === "GOLD_EFP" ? record.efp :
-              indicator.type === "GOLD_EFR" ? record.efr :
-              indicator.type === "GOLD_TAS" ? record.tas :
-              record.deliveries
-            ),
-            unit: indicator.unit,
-          });
-        }
+        await upsertHistoryRecord({
+          indicatorType: indicator.type,
+          observationDate: indicator.date,
+          value: String(currentVal),
+          unit: indicator.unit,
+        });
 
         console.log(`[DataFetcher] Updated ${indicator.type}: ${currentVal} (change: ${change})`);
         successful++;
@@ -267,8 +239,8 @@ export async function fetchGoldFuturesIndicators(): Promise<{
 
     return { successful, failed };
   } catch (error) {
-    console.error("[DataFetcher] Error fetching gold futures:", error);
-    return { successful: 0, failed: 4 };
+    console.error("[DataFetcher] Error fetching CME precious metals:", error);
+    return { successful: 0, failed: 8 };
   }
 }
 
@@ -281,12 +253,12 @@ export async function manualRefreshIndicators(apiKey: string) {
 }
 
 /**
- * 设置定时刷新任务（每天 UTC 18:00 = 美东时间 2PM）
+ * 设置定时刷新任务（启动时立即刷新，此后每 12 小时刷新一次）
  */
 export function scheduleDataRefresh(apiKey: string) {
-  const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 小时
+  const REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 每天两次
 
-  console.log("[DataFetcher] Scheduling daily data refresh...");
+  console.log("[DataFetcher] Scheduling data refresh every 12 hours...");
 
   // 立即执行一次初始化
   fetchAllIndicators(apiKey)
@@ -299,7 +271,7 @@ export function scheduleDataRefresh(apiKey: string) {
       console.error("[DataFetcher] Initial fetch failed:", err);
     });
 
-  // 每 24 小时刷新一次
+  // 每 12 小时刷新一次
   setInterval(() => {
     fetchAllIndicators(apiKey)
       .then(({ successful, failed }) => {
@@ -311,6 +283,21 @@ export function scheduleDataRefresh(apiKey: string) {
         console.error("[DataFetcher] Scheduled refresh failed:", err);
       });
   }, REFRESH_INTERVAL_MS);
+}
+
+/** Keep CME metals updating even when the optional FRED key is unavailable. */
+export function scheduleCMEDataRefresh() {
+  const REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
+  const refresh = () =>
+    fetchGoldFuturesIndicators()
+      .then(({ successful, failed }) => {
+        console.log(`[DataFetcher] CME bulletin refresh complete: ${successful} successful, ${failed} failed`);
+      })
+      .catch((err) => console.error("[DataFetcher] CME bulletin refresh failed:", err));
+
+  console.log("[DataFetcher] Scheduling CME bulletin refresh every 12 hours...");
+  void refresh();
+  setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
 }
 
 /**
