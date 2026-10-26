@@ -9,7 +9,6 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const CME_METALS_BULLETIN_URL =
   "https://www.cmegroup.com/daily_bulletin/current/Section62_Metals_Futures_Products.pdf";
-const BULLETIN_PAGE = 6;
 
 export interface PreciousMetalMetrics {
   date: string;
@@ -48,7 +47,7 @@ function getTradeDate(pageLines: Map<number, PositionedText[]>): string {
 function getContractTotals(
   lines: Map<number, PositionedText[]>,
   metal: "GOLD" | "SILVER"
-): Omit<PreciousMetalMetrics, "date"> {
+): Omit<PreciousMetalMetrics, "date"> | null {
   const totals = { efp: 0, efr: 0, tas: 0, deliveries: 0 };
   let inMetalSection = false;
   let foundMetalSection = false;
@@ -77,7 +76,7 @@ function getContractTotals(
     }
   }
 
-  if (!foundMetalSection) throw new Error(`COMEX ${metal} section not found in CME bulletin`);
+  if (!foundMetalSection) return null;
   return totals;
 }
 
@@ -93,24 +92,40 @@ export async function fetchLatestCMEPreciousMetals(): Promise<CMEPreciousMetalsS
   });
 
   const pdf = await pdfjs.getDocument({ data: new Uint8Array(response.data) }).promise;
-  if (pdf.numPages < BULLETIN_PAGE) {
-    throw new Error(`Unexpected CME metals bulletin: ${pdf.numPages} pages`);
+  if (pdf.numPages === 0) {
+    throw new Error("Unexpected CME metals bulletin: PDF has no pages");
   }
 
-  const page = await pdf.getPage(BULLETIN_PAGE);
-  const content = await page.getTextContent();
-  const lines = new Map<number, PositionedText[]>();
-  for (const item of content.items) {
-    if (!("str" in item) || !item.str.trim()) continue;
-    const y = Math.round(item.transform[5]);
-    const line = lines.get(y) ?? [];
-    line.push({ x: Math.round(item.transform[4]), text: item.str });
-    lines.set(y, line);
+  let date: string | undefined;
+  let goldTotals: Omit<PreciousMetalMetrics, "date"> | null = null;
+  let silverTotals: Omit<PreciousMetalMetrics, "date"> | null = null;
+
+  // CME's daily bulletin can shift sections between pages as products are added
+  // or removed. Scan each page instead of relying on a fixed PDF page number.
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const lines = new Map<number, PositionedText[]>();
+    for (const item of content.items) {
+      if (!("str" in item) || !item.str.trim()) continue;
+      const y = Math.round(item.transform[5]);
+      const line = lines.get(y) ?? [];
+      line.push({ x: Math.round(item.transform[4]), text: item.str });
+      lines.set(y, line);
+    }
+
+    if (pageNumber === 1) date = getTradeDate(lines);
+    goldTotals ??= getContractTotals(lines, "GOLD");
+    silverTotals ??= getContractTotals(lines, "SILVER");
+    if (goldTotals && silverTotals) break;
   }
 
-  const date = getTradeDate(lines);
-  const gold = { date, ...getContractTotals(lines, "GOLD") };
-  const silver = { date, ...getContractTotals(lines, "SILVER") };
+  if (!date) throw new Error("CME bulletin trade date was not found");
+  if (!goldTotals) throw new Error("COMEX GOLD section not found in CME bulletin");
+  if (!silverTotals) throw new Error("COMEX SILVER section not found in CME bulletin");
+
+  const gold = { date, ...goldTotals };
+  const silver = { date, ...silverTotals };
   console.log(
     `[CME Bulletin] ${date}: Gold EFP=${gold.efp} EFR=${gold.efr} TAS=${gold.tas} deliveries=${gold.deliveries}; ` +
       `Silver EFP=${silver.efp} EFR=${silver.efr} TAS=${silver.tas} deliveries=${silver.deliveries}`
