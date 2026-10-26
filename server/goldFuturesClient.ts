@@ -77,6 +77,11 @@ function getContractTotals(
   }
 
   if (!foundMetalSection) return null;
+
+  // A matched section with every metric parsed as zero is not a valid snapshot.
+  // CME's page layout can shift; do not let a column-position mismatch overwrite
+  // the last good database values with fabricated zeros.
+  if (Object.values(totals).every((value) => value === 0)) return null;
   return totals;
 }
 
@@ -121,8 +126,8 @@ export async function fetchLatestCMEPreciousMetals(): Promise<CMEPreciousMetalsS
   }
 
   if (!date) throw new Error("CME bulletin trade date was not found");
-  if (!goldTotals) throw new Error("COMEX GOLD section not found in CME bulletin");
-  if (!silverTotals) throw new Error("COMEX SILVER section not found in CME bulletin");
+  if (!goldTotals) throw new Error("COMEX GOLD section not found or has no readable nonzero totals in CME bulletin");
+  if (!silverTotals) throw new Error("COMEX SILVER section not found or has no readable nonzero totals in CME bulletin");
 
   const gold = { date, ...goldTotals };
   const silver = { date, ...silverTotals };
