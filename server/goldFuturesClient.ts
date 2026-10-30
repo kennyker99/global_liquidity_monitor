@@ -78,6 +78,11 @@ function getContractTotals(
 
   if (!foundMetalSection) return null;
 
+  // These columns are contract counts, so fractional values indicate that
+  // PDF text from an adjacent price/percentage column was captured by mistake.
+  // Reject the snapshot rather than publishing a plausible-looking bad value.
+  if (Object.values(totals).some((value) => !Number.isInteger(value))) return null;
+
   // A matched section with every metric parsed as zero is not a valid snapshot.
   // CME's page layout can shift; do not let a column-position mismatch overwrite
   // the last good database values with fabricated zeros.
